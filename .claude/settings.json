@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(**)",
+      "Edit(**)",
+      "Write(**)",
+      "Skill(skill-creator)",
+      "Skill(skill-creator:*)",
+      "WebFetch(domain:readthedocs.io)",
+      "WebFetch(domain:github.io)",
+      "WebFetch(domain:python.org)"
+    ]
+  }
+}

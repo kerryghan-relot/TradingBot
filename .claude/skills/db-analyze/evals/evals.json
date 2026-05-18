@@ -1,0 +1,17 @@
+{
+  "skill_name": "db-analyze",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "Can you analyze my trading database and give me a full report on how the bot has been performing? I want to see the regime breakdown, signal counts, and recent trades for both BTC and ETH.",
+      "expected_output": "A structured per-symbol report covering data coverage, regime distribution table, signal breakdown table, volume spike rate, last 5 BUY/SELL signals table, and last-24h breakdown. Followed by a summary paragraph.",
+      "files": []
+    },
+    {
+      "id": 1,
+      "prompt": "How many buy and sell signals has my bot generated? And what percentage of time is it in RANGING vs TRENDING mode?",
+      "expected_output": "Signal counts (BUY/SELL/HOLD) and regime distribution (RANGING vs TRENDING with percentages) for each symbol. Should handle empty DB gracefully if no data exists.",
+      "files": []
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "skill_name": "bot-status",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "Is my bot still running? Can you do a quick health check?",
+      "expected_output": "Report with three sections: Log (errors/warnings from bot.log, most recent bar-tick line), Data freshness (last bar timestamp per symbol with staleness flag if >5 min), Active config (all parameters in compact grouped format). Handles missing files gracefully.",
+      "files": []
+    },
+    {
+      "id": 1,
+      "prompt": "Check my bot — I think there might be an error in the logs. Also tell me what config it's running with.",
+      "expected_output": "All ERROR and WARNING lines from the last 60 lines of bot.log shown clearly. Active config displayed in compact grouped format. Data freshness check included.",
+      "files": []
+    }
+  ]
+}
