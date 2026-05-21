@@ -18,19 +18,28 @@ MINUTES_PAR_BOUGIE = 5
 PAUSE_ENTRE_APPELS = 15
 
 
+def symbol_to_filename(symbol: str) -> str:
+    """Convertit un symbole en nom de fichier valide (ex: BTC/USD → BTC-USD)"""
+    return symbol.replace("/", "-")
+
+
 def recuperer_historique(symbol: str):
     data_dir = Path(__file__).resolve().parent.parent / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
 
-    dossier_chunks = data_dir / f"chunks_{symbol}"
-    fichier_final  = data_dir / f"{symbol}_5min_3ans.csv"
+    safe_symbol   = symbol_to_filename(symbol)
+    dossier_chunks = data_dir / f"chunks_{safe_symbol}"
+    fichier_final  = data_dir / f"{safe_symbol}_5min_3ans.csv"
 
     end_date   = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
     start_date = end_date - timedelta(days=3 * 365)
 
+    # La crypto trade 24/7 — pas de filtre sur les heures de marché
+    is_crypto = "/" in symbol
+
     print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     print(f"  {symbol} — {INTERVAL} — {start_date.date()} → {end_date.date()}")
-    print(f"  Mode chunk par outputsize = {BOUGIES_PAR_CHUNK}")
+    print(f"  {'Crypto (24/7)' if is_crypto else 'Action'}")
     print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 
     dossier_chunks.mkdir(exist_ok=True)
@@ -43,7 +52,11 @@ def recuperer_historique(symbol: str):
         nom_chunk = dossier_chunks / f"chunk_{i:03d}.csv"
 
         if nom_chunk.exists():
-            print(f"  [{i}] chunk déjà présent, ignoré — fin {cursor.strftime('%Y-%m-%d %H:%M:%S')}")
+            # Lire le chunk pour retrouver la date la plus ancienne et repositionner le curseur
+            df_chunk = pd.read_csv(nom_chunk, parse_dates=["datetime"])
+            plus_ancien = df_chunk["datetime"].min()
+            cursor = plus_ancien - timedelta(minutes=MINUTES_PAR_BOUGIE)
+            print(f"  [{i}] chunk déjà présent, ignoré — curseur → {cursor.strftime('%Y-%m-%d %H:%M:%S')}")
             fichiers_chunks.append(nom_chunk)
             i += 1
             continue
@@ -68,7 +81,7 @@ def recuperer_historique(symbol: str):
         valeurs = data.get("values", [])
 
         if not valeurs:
-            print("aucune donnée (période hors marché ?), ignorée")
+            print("aucune donnée, ignorée")
             cursor -= timedelta(minutes=MINUTES_PAR_BOUGIE)
             i += 1
             continue

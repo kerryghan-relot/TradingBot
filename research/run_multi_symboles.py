@@ -8,14 +8,11 @@ from twelve_data_5min_3ans import recuperer_historique
 
 # ── Liste des symboles à télécharger ──────────────────────────
 SYMBOLES = [
-    "AAPL",
-    "MSFT",
-    "NVDA",
-    #"GOOGL",
-    #"AMZN",
-    # Ajoute autant de symboles que tu veux
+   
+    # ── Cryptocurrencies ─────────────────────────────────────────────────
+    "BTC/USD", # Bitcoin
+    "ETH/USD", # Ethereum
 ]
-
 # ── Boucle principale ──────────────────────────────────────────
 succes = []
 echecs = []

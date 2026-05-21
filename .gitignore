@@ -1,3 +1,9 @@
+.python-version
+ETH-USD_5min_3ans.csv
+data/
+resultats/
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

@@ -10,16 +10,16 @@ import vectorbt as vbt
 from datetime import datetime, timedelta
 
 # ── Configuration ──────────────────────────────────────────────
-SYMBOL   = "AAPL"
+SYMBOL   = "AAPL"  # Symbole de l'action (ex : AAPL, MSFT, LVMH.PA)
 INTERVAL = "1day"
-CSV_FILENAME = "AAPL_2023-05-16_2026-05-15.csv"
+CSV_FILENAME = "AAPL_5min_3ans.csv"
 CSV_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "data", CSV_FILENAME)
 )
 
 RSI_PERIOD  = 14
-RSI_SURVENTE  = 70   # Signal d'achat en dessous de ce seuil
-RSI_SURACHAT  = 30   # Signal de vente au dessus de ce seuil
+RSI_SURVENTE  = 30   # Signal d'achat en dessous de ce seuil
+RSI_SURACHAT  = 70     # Signal de vente au dessus de ce seuil
 
 CAPITAL_INITIAL = 10_000  # en dollars
 
