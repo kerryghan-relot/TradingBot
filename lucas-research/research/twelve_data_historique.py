@@ -8,9 +8,13 @@ import os
 import requests
 import json
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
 
 # ── Configuration ──────────────────────────────────────────────
 
+
+
+load_dotenv()
 API_KEY = os.getenv("TWELVE_DATA_API_KEY")  # https://twelvedata.com → s'inscrire gratuitement
 SYMBOL  = "AAPL"            # Symbole de l'action (ex : AAPL, MSFT, LVMH.PA)
 INTERVAL = "15min"           # Intervalles dispo : 1min, 5min, 15min, 1h, 1day, 1week, 1month

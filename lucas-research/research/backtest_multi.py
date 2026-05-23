@@ -1,127 +1,199 @@
 """
-Backtest multi-stratégies / multi-actions avec vectorbt
-Optimisé pour un grand nombre de stratégies (pas de crash RAM)
+Multi-strategy / multi-asset backtest with vectorbt.
+=====================================================
 
-Optimisations :
-  - Aucun graphique Plotly généré (source principale du crash)
-  - Libération mémoire explicite après chaque portfolio
-  - Sauvegarde CSV incrémentale (pas tout en mémoire)
-  - Barre de progression + estimation du temps restant
-  - Rapport HTML final léger (tableau, pas de graphiques)
+Memory-optimised: no Plotly charts by default, incremental CSV
+writes, explicit garbage collection after each portfolio.
+
+Usage::
+
+    python backtest_multi.py                  # vote strategies, table only
+    python backtest_multi.py --html           # vote strategies + Plotly charts
+    python backtest_multi.py --ml             # RandomForest strategy
+    python backtest_multi.py --ml --html      # RF + Plotly charts
+    python backtest_multi.py --walk-forward   # out-of-sample last 30 %
+    python backtest_multi.py --walk-forward --test-ratio 0.25
+
+Outputs:
+    resultats/resultats_backtest.csv
+    resultats/resultats_backtest.html
+    resultats/{SYMBOL}_backtest.html  (only with --html)
 """
 
+import argparse
 import gc
-import os
+import logging
 import time
-import pandas as pd
-import numpy as np
 from pathlib import Path
+
+import numpy as np
+import pandas as pd
 import vectorbt as vbt
 
-from strategies import STRATEGIES
+from config import CAPITAL_INITIAL, DATA_DIR, FEES, OUTPUT_DIR
 
-# ── Configuration ──────────────────────────────────────────────
-DATA_DIR        = Path(__file__).resolve().parent.parent / "data"
-OUTPUT_DIR      = Path(__file__).resolve().parent.parent / "resultats"
-OUTPUT_DIR.mkdir(exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-8s %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
-CAPITAL_INITIAL = 10_000
-FEES            = 0.0005   # 0.05% par trade
+# ── CLI ─────────────────────────────────────────────────────────
+_parser = argparse.ArgumentParser(description="Multi-strategy backtest")
+_parser.add_argument(
+    "--ml",
+    action="store_true",
+    help="Use RandomForest strategy instead of vote strategies",
+)
+_parser.add_argument(
+    "--html",
+    action="store_true",
+    help="Generate per-symbol Plotly charts (uses more RAM)",
+)
+_parser.add_argument(
+    "--walk-forward",
+    action="store_true",
+    help=(
+        "Compute signals on full series (warmup), "
+        "evaluate metrics on last --test-ratio of data only"
+    ),
+)
+_parser.add_argument(
+    "--test-ratio",
+    type=float,
+    default=0.3,
+    metavar="RATIO",
+    help="Fraction of data used as out-of-sample test set (default: 0.3)",
+)
+args = _parser.parse_args()
 
-CSV_OUT         = OUTPUT_DIR / "resultats_backtest.csv"
-HTML_OUT        = OUTPUT_DIR / "resultats_backtest.html"
+if args.ml:
+    from strategies_ML import STRATEGIES
+else:
+    from strategies import STRATEGIES
 
-# ── Chargement des fichiers ────────────────────────────────────
+# Output filename encodes the run mode so multiple runs coexist
+_suffix = ("_ml" if args.ml else "") + ("_wf" if args.walk_forward else "")
+CSV_OUT = OUTPUT_DIR / f"resultats_backtest{_suffix}.csv"
+HTML_OUT = OUTPUT_DIR / f"resultats_backtest{_suffix}.html"
+
+# ── Load files ───────────────────────────────────────────────────
 csv_files = sorted(DATA_DIR.glob("*_5min_3ans.csv"))
-
 if not csv_files:
-    print(f"Aucun fichier CSV trouvé dans {DATA_DIR}")
-    exit(1)
+    raise SystemExit(f"No CSV files found in {DATA_DIR}")
 
-nb_actions  = len(csv_files)
-nb_strats   = len(STRATEGIES)
-nb_total    = nb_actions * nb_strats
+nb_assets = len(csv_files)
+nb_strats = len(STRATEGIES)
+nb_total = nb_assets * nb_strats
 
-print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-print(f"  {nb_actions} actions × {nb_strats} stratégies = {nb_total} backtests")
-print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+logger.info(
+    "%d assets × %d strategies = %d backtests  [ml=%s | html=%s | wf=%s]",
+    nb_assets, nb_strats, nb_total,
+    args.ml, args.html, args.walk_forward,
+)
+logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-# ── CSV incrémental : écriture ligne par ligne ─────────────────
-COLONNES = [
-    "Symbole", "Stratégie", "Capital final", "Performance %",
+# ── CSV header ───────────────────────────────────────────────────
+COLUMNS = [
+    "Symbol", "Strategy", "Final Capital", "Performance %",
     "Buy&Hold %", "Alpha vs B&H", "Sharpe", "Max Drawdown %",
-    "Nb trades", "Win Rate %",
+    "Trades", "Win Rate %",
 ]
+with open(CSV_OUT, "w", encoding="utf-8") as _f:
+    _f.write(",".join(COLUMNS) + "\n")
 
-# Initialise le CSV avec l'en-tête
-with open(CSV_OUT, "w", encoding="utf-8") as f:
-    f.write(",".join(COLONNES) + "\n")
-
-# ── Boucle principale ──────────────────────────────────────────
-t_global   = time.time()
-n_done     = 0
-n_ok       = 0
-n_err      = 0
+# ── Main loop ────────────────────────────────────────────────────
+t_global = time.time()
+n_done = 0
+n_ok = 0
+n_err = 0
 
 for csv_file in csv_files:
     symbol = csv_file.stem.replace("_5min_3ans", "").replace("-", "/")
 
     df = pd.read_csv(csv_file, parse_dates=["datetime"])
     df = df.set_index("datetime").sort_index()
-    df["close"] = df["close"].astype(float)
-    close = df["close"]
+    for _col in ["open", "high", "low", "close", "volume"]:
+        if _col in df.columns:
+            df[_col] = df[_col].astype(float)
+    close_full: pd.Series = df["close"]
+    df_full: pd.DataFrame = df
 
-    # Buy & Hold
-    bh_perf = ((close.iloc[-1] - close.iloc[0]) / close.iloc[0]) * 100
+    bh_full = (close_full.iloc[-1] / close_full.iloc[0] - 1) * 100
+    logger.info("\n▶ %s  (B&H full: %+.1f%%)", symbol, bh_full)
+    logger.info(
+        "  %-35s %7s  %7s  %7s  %6s",
+        "Strategy", "Perf", "Alpha", "Sharpe", "Trades",
+    )
+    logger.info("  %s %s  %s  %s  %s", "-"*35, "-"*7, "-"*7, "-"*7, "-"*6)
 
-    print(f"\n▶ {symbol}  (B&H : {bh_perf:+.1f}%)")
-    print(f"  {'Stratégie':<35} {'Perf':>7}  {'Alpha':>7}  {'Sharpe':>7}  {'Trades':>6}")
-    print(f"  {'-'*35} {'-'*7}  {'-'*7}  {'-'*7}  {'-'*6}")
+    t_asset = time.time()
+    figures: dict[str, object] = {}
+    html_rows_asset: list[dict] = []
 
-    t_action = time.time()
-
-    for nom_strat, fn_strat in STRATEGIES.items():
+    for strat_name, fn_strat in STRATEGIES.items():
+        pf = None
         try:
-            entrees, sorties = fn_strat(close)
+            if args.walk_forward:
+                test_idx = int(len(close_full) * (1 - args.test_ratio))
+                # Compute signals on the full series so indicators warm up
+                entries_full, exits_full = fn_strat(df_full)
+                close_eval = close_full.iloc[test_idx:]
+                entries_eval = entries_full.iloc[test_idx:]
+                exits_eval = exits_full.iloc[test_idx:]
+                bh_eval = (close_eval.iloc[-1] / close_eval.iloc[0] - 1) * 100
+            else:
+                entries_eval, exits_eval = fn_strat(df_full)
+                close_eval = close_full
+                bh_eval = bh_full
 
             pf = vbt.Portfolio.from_signals(
-                close,
-                entries=entrees,
-                exits=sorties,
+                close_eval,
+                entries=entries_eval,
+                exits=exits_eval,
                 init_cash=CAPITAL_INITIAL,
                 fees=FEES,
                 freq="5min",
             )
 
-            stats  = pf.stats()
-            perf   = round(float(stats["Total Return [%]"]),  2)
-            sharpe = round(float(stats["Sharpe Ratio"]),       3)
-            dd     = round(float(stats["Max Drawdown [%]"]),   2)
+            stats = pf.stats()
+            perf = round(float(stats["Total Return [%]"]), 2)
+            sharpe = round(float(stats["Sharpe Ratio"]), 3)
+            dd = round(float(stats["Max Drawdown [%]"]), 2)
             trades = int(stats["Total Trades"])
-            wr     = round(float(stats["Win Rate [%]"]),       1)
-            alpha  = round(perf - bh_perf,                     2)
+            wr = round(float(stats["Win Rate [%]"]), 1)
+            alpha = round(perf - bh_eval, 2)
 
-            # Écriture immédiate dans le CSV (pas de liste en mémoire)
-            ligne_csv = (
-                f'"{symbol}","{nom_strat}",'
-                f"{round(CAPITAL_INITIAL * (1 + perf/100), 2)},"
-                f"{perf},{round(bh_perf,2)},{alpha},"
+            row_csv = (
+                f'"{symbol}","{strat_name}",'
+                f"{round(CAPITAL_INITIAL * (1 + perf / 100), 2)},"
+                f"{perf},{round(bh_eval, 2)},{alpha},"
                 f"{sharpe},{dd},{trades},{wr}\n"
             )
-            with open(CSV_OUT, "a", encoding="utf-8") as f:
-                f.write(ligne_csv)
+            with open(CSV_OUT, "a", encoding="utf-8") as _f:
+                _f.write(row_csv)
 
-            signe = "✓" if alpha >= 0 else "✗"
-            print(f"  {nom_strat:<35} {perf:>+7.1f}%  {alpha:>+7.1f}%  {sharpe:>7.3f}  {trades:>6}  {signe}")
+            sign = "✓" if alpha >= 0 else "✗"
+            logger.info(
+                "  %-35s %+7.1f%%  %+7.1f%%  %7.3f  %6d  %s",
+                strat_name, perf, alpha, sharpe, trades, sign,
+            )
+
+            if args.html:
+                figures[strat_name] = pf.plot()
+                html_rows_asset.append(
+                    {"strat": strat_name, "perf": perf, "alpha": alpha}
+                )
 
             n_ok += 1
 
-        except Exception as e:
-            print(f"  {nom_strat:<35} ✗ {e}")
+        except Exception as exc:
+            logger.warning("  %-35s ✗ %s", strat_name, exc)
             n_err += 1
 
         finally:
-            # Libération mémoire critique
             try:
                 del pf
             except Exception:
@@ -129,73 +201,112 @@ for csv_file in csv_files:
             gc.collect()
 
         n_done += 1
-
-        # Estimation temps restant toutes les 50 itérations
         if n_done % 50 == 0:
-            elapsed  = time.time() - t_global
-            restant  = (elapsed / n_done) * (nb_total - n_done)
-            print(f"\n  ⏱  {n_done}/{nb_total} — "
-                  f"~{restant/60:.1f} min restantes\n")
+            elapsed = time.time() - t_global
+            remaining = (elapsed / n_done) * (nb_total - n_done)
+            logger.info(
+                "  ⏱  %d/%d — ~%.1f min remaining",
+                n_done, nb_total, remaining / 60,
+            )
 
-    print(f"  → {symbol} terminé en {time.time()-t_action:.1f}s")
-    del close, df
+    logger.info("  → %s done in %.1fs", symbol, time.time() - t_asset)
+
+    # ── Per-symbol Plotly HTML (only with --html) ─────────────────
+    if args.html and figures:
+        safe = symbol.replace("/", "-")
+        html_path = OUTPUT_DIR / f"{safe}_backtest.html"
+        bh_capital = CAPITAL_INITIAL * (1 + bh_full / 100)
+        parts = [
+            "<html><head><meta charset='utf-8'>",
+            f"<title>Backtest {symbol}</title>",
+            "<style>body{font-family:sans-serif;margin:2rem} "
+            "h2{border-bottom:2px solid #333} "
+            ".bh{background:#f0f4ff;padding:.5rem 1rem;border-radius:6px;"
+            "display:inline-block;margin-bottom:1rem}</style>",
+            "</head><body>",
+            f"<h2>{symbol} — multi-strategy backtest</h2>",
+            f"<div class='bh'>Buy &amp; Hold: <strong>{bh_full:+.1f}%</strong>"
+            f" → {bh_capital:,.0f} $</div>",
+        ]
+        for info in html_rows_asset:
+            name = info["strat"]
+            alpha = info["alpha"]
+            color = "#2a7a2a" if alpha >= 0 else "#a02020"
+            parts.append(
+                f"<h3>{name} — {info['perf']:+.1f}% "
+                f"<span style='color:{color};font-size:.85em'>"
+                f"({alpha:+.1f}% vs B&H)</span></h3>"
+            )
+            fig = figures[name]
+            parts.append(fig.to_html(full_html=False, include_plotlyjs="cdn"))
+        parts.append("</body></html>")
+        with open(html_path, "w", encoding="utf-8") as _f:
+            _f.write("\n".join(parts))
+        logger.info("  → chart: %s", html_path.name)
+
+    del close_full, df, figures, html_rows_asset
     gc.collect()
 
-# ── Lecture du CSV final et tri ────────────────────────────────
+# ── Sort CSV ─────────────────────────────────────────────────────
 df_res = pd.read_csv(CSV_OUT)
 df_res = df_res.sort_values("Alpha vs B&H", ascending=False)
 df_res.to_csv(CSV_OUT, index=False)
 
-# ── Rapport HTML léger (tableau, sans graphique) ───────────────
+# ── Lightweight HTML report ──────────────────────────────────────
 top50 = df_res.head(50)
-
 rows_html = ""
 for _, r in top50.iterrows():
-    alpha  = r["Alpha vs B&H"]
-    couleur = "#1a6e1a" if alpha >= 0 else "#8b1a1a"
+    alpha = r["Alpha vs B&H"]
+    color = "#1a6e1a" if alpha >= 0 else "#8b1a1a"
     rows_html += (
         f"<tr>"
-        f"<td>{r['Symbole']}</td>"
-        f"<td>{r['Stratégie']}</td>"
+        f"<td>{r['Symbol']}</td><td>{r['Strategy']}</td>"
         f"<td>{r['Performance %']:+.2f}%</td>"
         f"<td>{r['Buy&Hold %']:+.2f}%</td>"
-        f"<td style='color:{couleur};font-weight:600'>{alpha:+.2f}%</td>"
+        f"<td style='color:{color};font-weight:600'>{alpha:+.2f}%</td>"
         f"<td>{r['Sharpe']:.3f}</td>"
         f"<td>{r['Max Drawdown %']:.2f}%</td>"
-        f"<td>{int(r['Nb trades'])}</td>"
+        f"<td>{int(r['Trades'])}</td>"
         f"<td>{r['Win Rate %']:.1f}%</td>"
         f"</tr>\n"
     )
 
+walk_note = (
+    f"Walk-forward: last {int(args.test_ratio * 100)}% out-of-sample"
+    if args.walk_forward
+    else "Full in-sample"
+)
+
 html = f"""<!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="utf-8">
-<title>Backtest – Top 50</title>
+<html lang="en">
+<head><meta charset="utf-8"><title>Backtest – Top 50</title>
 <style>
   body  {{ font-family: sans-serif; margin: 2rem; color: #111; }}
-  h1    {{ font-size: 1.4rem; border-bottom: 2px solid #333; padding-bottom:.4rem }}
-  .meta {{ background:#f0f4ff; padding:.6rem 1rem; border-radius:6px;
-           display:inline-block; margin-bottom:1.5rem; font-size:.9rem }}
+  h1    {{ font-size: 1.4rem; border-bottom: 2px solid #333;
+           padding-bottom: .4rem; }}
+  .meta {{ background: #f0f4ff; padding: .6rem 1rem; border-radius: 6px;
+           display: inline-block; margin-bottom: 1.5rem; font-size: .9rem; }}
   table {{ border-collapse: collapse; width: 100%; font-size: .85rem; }}
-  th    {{ background:#222; color:#fff; padding:.5rem .8rem; text-align:left; }}
-  td    {{ padding:.4rem .8rem; border-bottom:1px solid #ddd; }}
-  tr:hover td {{ background:#f5f7ff; }}
+  th    {{ background: #222; color: #fff; padding: .5rem .8rem;
+           text-align: left; }}
+  td    {{ padding: .4rem .8rem; border-bottom: 1px solid #ddd; }}
+  tr:hover td {{ background: #f5f7ff; }}
 </style>
 </head>
 <body>
-<h1>Backtest – Top 50 stratégies par Alpha vs Buy &amp; Hold</h1>
+<h1>Backtest – Top 50 strategies by Alpha vs Buy &amp; Hold</h1>
 <div class="meta">
-  {nb_actions} actions &nbsp;×&nbsp; {nb_strats} stratégies
-  &nbsp;|&nbsp; {n_ok} backtests réussis, {n_err} erreurs
-  &nbsp;|&nbsp; Capital initial : {CAPITAL_INITIAL:,} $
-  &nbsp;|&nbsp; Frais : {FEES*100:.3f}% / trade
+  {nb_assets} assets &nbsp;×&nbsp; {nb_strats} strategies
+  &nbsp;|&nbsp; {n_ok} succeeded, {n_err} errors
+  &nbsp;|&nbsp; Capital: {CAPITAL_INITIAL:,.0f} $
+  &nbsp;|&nbsp; Fees: {FEES * 100:.3f}% / trade
+  &nbsp;|&nbsp; {walk_note}
 </div>
 <table>
 <thead>
   <tr>
-    <th>Symbole</th><th>Stratégie</th>
-    <th>Perf %</th><th>Buy&amp;Hold %</th><th>Alpha</th>
+    <th>Symbol</th><th>Strategy</th>
+    <th>Perf %</th><th>B&amp;H %</th><th>Alpha</th>
     <th>Sharpe</th><th>Max DD %</th><th>Trades</th><th>Win Rate</th>
   </tr>
 </thead>
@@ -206,19 +317,23 @@ html = f"""<!DOCTYPE html>
 </body>
 </html>"""
 
-with open(HTML_OUT, "w", encoding="utf-8") as f:
-    f.write(html)
+with open(HTML_OUT, "w", encoding="utf-8") as _f:
+    _f.write(html)
 
-# ── Résumé final ───────────────────────────────────────────────
+# ── Final summary ────────────────────────────────────────────────
 elapsed_total = time.time() - t_global
-print(f"\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-print(f"  ✓ {n_ok} backtests réussis / {n_err} erreurs")
-print(f"  ✓ Durée totale : {elapsed_total/60:.1f} min")
-print(f"  ✓ CSV complet  : {CSV_OUT}")
-print(f"  ✓ HTML top 50  : {HTML_OUT}")
-print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+logger.info("✓ %d backtests succeeded / %d errors", n_ok, n_err)
+logger.info("✓ Total time: %.1f min", elapsed_total / 60)
+logger.info("✓ CSV:  %s", CSV_OUT)
+logger.info("✓ HTML: %s", HTML_OUT)
+logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-print("\n── Top 10 alpha vs Buy & Hold ──")
-print(df_res.nlargest(10, "Alpha vs B&H")[
-    ["Symbole", "Stratégie", "Performance %", "Buy&Hold %", "Alpha vs B&H", "Sharpe"]
-].to_string(index=False))
+logger.info("\n── Top 10 by Alpha vs B&H ──")
+logger.info(
+    "\n%s",
+    df_res.nlargest(10, "Alpha vs B&H")[
+        ["Symbol", "Strategy", "Performance %",
+         "Buy&Hold %", "Alpha vs B&H", "Sharpe"]
+    ].to_string(index=False),
+)

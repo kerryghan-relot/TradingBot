@@ -1,107 +1,146 @@
 """
-Stratégie de trading – Random Forest – données 5min
-===================================================
+Trading strategy – XGBoost – 5-min bar data.
+============================================
 
-Remplace les combinaisons de votes manuels par un modèle
-RandomForestClassifier entraîné sur les signaux techniques.
+Replaces manual vote combinations with an XGBClassifier trained
+on continuous technical features (not binary signals).
 
-Features utilisees :
-    - Bollinger (signal bullish)
-    - EMA cross (signal bullish)
-    - MACD zero (signal bullish)
-    - Z-score (signal bullish)
+Features (continuous):
+    - Returns at 1, 6, 24, 78 bars (multi-horizon momentum)
+    - Rolling 20-bar volatility of returns
+    - Continuous RSI value
+    - Continuous Z-score (distance from rolling mean in std-devs)
+    - Bollinger %b (position within the band, 0=lower, 1=upper)
+    - Continuous MACD value
+    - MACD − signal line distance
+    - Normalised distance from slow EMA
+    - Volume ratio vs rolling mean (if volume available)
+    - Volume Z-score (if volume available)
 
-Le modèle prédit :
-  1 = hausse future
-  0 = baisse / neutre
+Target:
+    1 if future return over FUTURE_BARS > RETURN_TH, else 0.
 
-Entrée :
-  proba_long > seuil_long
-
-Sortie :
-  proba_long < seuil_exit
+Train/test split: chronological 70 / 15 (val) / 15 (test).
+Early stopping uses the validation set to prevent overfitting.
+Signals are only generated on the held-out test portion.
 """
 
 import numpy as np
 import pandas as pd
 import vectorbt as vbt
-
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import StandardScaler
-
+from xgboost import XGBClassifier
 
 # ──────────────────────────────────────────────────────────────
-# PARAMÈTRES
+# PARAMETERS
 # ──────────────────────────────────────────────────────────────
 
-BB_PERIOD  = 120
-BB_STD     = 2
+BB_PERIOD: int = 120
+BB_STD: float = 2.0
 
-EMA_FAST   = 10
-EMA_SLOW   = 50
+EMA_FAST: int = 10
+EMA_SLOW: int = 50
 
-MACD_F     = 8
-MACD_S     = 21
-MACD_SIG   = 5
+MACD_F: int = 8
+MACD_S: int = 21
+MACD_SIG: int = 5
 
-ZSCORE_WIN = 120
-ZSCORE_TH  = 1.5
+RSI_PERIOD: int = 14
+ZSCORE_WIN: int = 120
 
 # ML
-FUTURE_BARS   = 6       # horizon prediction (~30min)
-RETURN_TH     = 0.001   # +0.1%
-TRAIN_RATIO   = 0.7
+FUTURE_BARS: int = 6        # prediction horizon (~30 min)
+RETURN_TH: float = 0.001    # +0.1% forward return to label as 1
+TRAIN_RATIO: float = 0.70   # first 70% for train + validation
+VAL_SPLIT: float = 0.80     # within train: 80% train, 20% val (early stop)
 
-N_ESTIMATORS  = 300
-MAX_DEPTH     = 8
-RANDOM_STATE  = 42
+N_ESTIMATORS: int = 300
+MAX_DEPTH: int = 6
+LEARNING_RATE: float = 0.05
+SUBSAMPLE: float = 0.8
+COLSAMPLE_BYTREE: float = 0.8
+MIN_CHILD_WEIGHT: int = 5
+EARLY_STOPPING_ROUNDS: int = 20
 
-ENTRY_TH      = 0.55
-EXIT_TH       = 0.50
+ENTRY_TH: float = 0.55
+EXIT_TH: float = 0.50
 
 
 # ──────────────────────────────────────────────────────────────
-# HELPERS
+# HELPER
 # ──────────────────────────────────────────────────────────────
 
 def _disc(s: pd.Series) -> pd.Series:
+    """Return the first True of each run of consecutive True values."""
     s = s.fillna(False)
     return s & ~s.shift(1).fillna(False)
 
 
 # ──────────────────────────────────────────────────────────────
-# FEATURES
+# FEATURE ENGINEERING
 # ──────────────────────────────────────────────────────────────
 
-def build_features(close: pd.Series) -> pd.DataFrame:
+def build_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Build a continuous feature matrix from an OHLCV DataFrame.
 
-    df = pd.DataFrame(index=close.index)
+    Using continuous values (not binary thresholds) gives XGBoost
+    richer information and more split points to learn from.
+    Volume features are added when the column is available.
 
-    # Bollinger signal bullish (close sous la bande basse)
+    Args:
+        df (pd.DataFrame): OHLCV DataFrame indexed by datetime.
+
+    Returns:
+        pd.DataFrame: Feature matrix, same index as ``df``.
+    """
+    close = df["close"]
+    features = pd.DataFrame(index=close.index)
+
+    # Multi-horizon returns (momentum)
+    features["ret_1"] = close.pct_change(1)
+    features["ret_6"] = close.pct_change(6)
+    features["ret_24"] = close.pct_change(24)
+    features["ret_78"] = close.pct_change(78)   # ~1 trading day
+
+    # Short-term realised volatility
+    features["vol_20"] = features["ret_1"].rolling(20).std()
+
+    # Continuous RSI (not a binary oversold/overbought flag)
+    features["rsi"] = vbt.RSI.run(close, window=RSI_PERIOD).rsi
+
+    # Continuous Z-score (signed distance from rolling mean)
+    mu = close.rolling(ZSCORE_WIN).mean()
+    sigma = close.rolling(ZSCORE_WIN).std()
+    features["zscore"] = (close - mu) / sigma.replace(0, np.nan)
+
+    # Bollinger %b: 0 = at lower band, 1 = at upper band
     bb = vbt.BBANDS.run(close, window=BB_PERIOD, alpha=BB_STD)
-    df["bb_bull"] = (close < bb.lower).astype(int)
+    bb_range = (bb.upper - bb.lower).replace(0, np.nan)
+    features["bb_pct"] = (close - bb.lower) / bb_range
 
-    # EMA cross bullish (ema fast au-dessus ema slow)
-    ema_fast = close.ewm(span=EMA_FAST, adjust=False).mean()
-    ema_slow = close.ewm(span=EMA_SLOW, adjust=False).mean()
-    df["ema_cross_bull"] = (ema_fast > ema_slow).astype(int)
-
-    # MACD zero bullish (macd > 0)
+    # Continuous MACD and distance to signal line
     macd_ind = vbt.MACD.run(
         close,
         fast_window=MACD_F,
         slow_window=MACD_S,
-        signal_window=MACD_SIG
+        signal_window=MACD_SIG,
     )
-    df["macd_zero_bull"] = (macd_ind.macd > 0).astype(int)
+    features["macd"] = macd_ind.macd
+    features["macd_signal_diff"] = macd_ind.macd - macd_ind.signal
 
-    # Z-score bullish (survente statistique)
-    mu = close.rolling(ZSCORE_WIN).mean()
-    sigma = close.rolling(ZSCORE_WIN).std()
-    zscore = (close - mu) / sigma.replace(0, np.nan)
-    df["zscore_bull"] = (zscore < -ZSCORE_TH).astype(int)
+    # Normalised distance of close from slow EMA
+    ema_slow = close.ewm(span=EMA_SLOW, adjust=False).mean()
+    features["ema_dist"] = (close - ema_slow) / ema_slow.replace(0, np.nan)
 
-    return df
+    # Volume features (optional — skipped if column absent or all-NaN)
+    if "volume" in df.columns and df["volume"].notna().any():
+        vol = df["volume"].replace(0, np.nan)
+        vol_ma = vol.rolling(20).mean()
+        features["vol_ratio"] = vol / vol_ma.replace(0, np.nan)
+        vol_std = vol.rolling(20).std()
+        features["vol_zscore"] = (vol - vol_ma) / vol_std.replace(0, np.nan)
+
+    return features
 
 
 # ──────────────────────────────────────────────────────────────
@@ -110,81 +149,86 @@ def build_features(close: pd.Series) -> pd.DataFrame:
 
 def build_target(close: pd.Series) -> pd.Series:
     """
-    1 si rendement futur > RETURN_TH
+    Build a binary classification target from future returns.
+
+    Args:
+        close (pd.Series): Close price series.
+
+    Returns:
+        pd.Series: 1 if FUTURE_BARS forward return > RETURN_TH, else 0.
     """
-
-    future_ret = (
-        close.shift(-FUTURE_BARS) / close - 1
-    )
-
-    y = (future_ret > RETURN_TH).astype(int)
-
-    return y
+    future_ret = close.shift(-FUTURE_BARS) / close - 1
+    return (future_ret > RETURN_TH).astype(int)
 
 
 # ──────────────────────────────────────────────────────────────
-# RANDOM FOREST STRATEGY
+# XGBOOST STRATEGY
 # ──────────────────────────────────────────────────────────────
 
-def random_forest_strategy(close: pd.Series):
+def xgboost_strategy(
+    df: pd.DataFrame,
+) -> tuple[pd.Series, pd.Series]:
+    """
+    Train an XGBClassifier on the first TRAIN_RATIO of data and
+    generate entry/exit signals on the held-out test portion only.
 
-    # Features
-    X = build_features(close)
+    A validation slice (last VAL_SPLIT of the training window) is used
+    for early stopping to prevent overfitting without leaking test data.
+    The chronological split ensures no future information leaks into
+    the training set.
 
-    # Target
+    Args:
+        df (pd.DataFrame): Full OHLCV DataFrame (datetime index).
+
+    Returns:
+        tuple[pd.Series, pd.Series]: (entries, exits) boolean series.
+    """
+    close = df["close"]
+    X = build_features(df)
     y = build_target(close)
 
-    # Clean
-    data = pd.concat([X, y.rename("target")], axis=1)
-    data = data.dropna()
+    data = pd.concat([X, y.rename("target")], axis=1).dropna()
+    X_clean = data.drop(columns="target")
+    y_clean = data["target"]
 
-    X = data.drop(columns="target")
-    y = data["target"]
+    train_end = int(len(data) * TRAIN_RATIO)
+    X_train = X_clean.iloc[:train_end]
+    y_train = y_clean.iloc[:train_end]
+    X_test = X_clean.iloc[train_end:]
 
-    # Split train/test chronologique
-    split = int(len(data) * TRAIN_RATIO)
+    # Chronological train / validation split within the train window
+    val_start = int(len(X_train) * VAL_SPLIT)
+    X_tr, X_val = X_train.iloc[:val_start], X_train.iloc[val_start:]
+    y_tr, y_val = y_train.iloc[:val_start], y_train.iloc[val_start:]
 
-    X_train = X.iloc[:split]
-    y_train = y.iloc[:split]
-
-    X_test = X.iloc[split:]
-
-    # Scaling
-    scaler = StandardScaler()
-
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_all_scaled   = scaler.transform(X)
-
-    # Model
-    model = RandomForestClassifier(
+    model = XGBClassifier(
         n_estimators=N_ESTIMATORS,
         max_depth=MAX_DEPTH,
-        min_samples_leaf=5,
-        random_state=RANDOM_STATE,
+        learning_rate=LEARNING_RATE,
+        subsample=SUBSAMPLE,
+        colsample_bytree=COLSAMPLE_BYTREE,
+        min_child_weight=MIN_CHILD_WEIGHT,
         n_jobs=-1,
-        class_weight="balanced_subsample"
+        eval_metric="logloss",
+        early_stopping_rounds=EARLY_STOPPING_ROUNDS,
+    )
+    model.fit(
+        X_tr, y_tr,
+        eval_set=[(X_val, y_val)],
+        verbose=False,
     )
 
-    model.fit(X_train_scaled, y_train)
+    probs = model.predict_proba(X_clean)[:, 1]
+    probas = pd.Series(probs, index=X_clean.index, name="proba_long")
 
-    # Predict probabilities
-    probs = model.predict_proba(X_all_scaled)[:, 1]
-
-    probas = pd.Series(
-        probs,
-        index=X.index,
-        name="proba_long"
-    )
-
-    # Signals
     entries = probas > ENTRY_TH
-    exits   = probas < EXIT_TH
+    exits = probas < EXIT_TH
 
-    # Align index
+    # Align to the full close index (NaN rows were dropped in data)
     entries = entries.reindex(close.index).fillna(False)
-    exits   = exits.reindex(close.index).fillna(False)
+    exits = exits.reindex(close.index).fillna(False)
 
-    # Backtest uniquement sur la partie test
+    # Mask signals to the test period only (out-of-sample)
     if len(X_test) > 0:
         test_start = X_test.index[0]
         test_mask = close.index >= test_start
@@ -195,11 +239,11 @@ def random_forest_strategy(close: pd.Series):
 
 
 # ──────────────────────────────────────────────────────────────
-# REGISTRE STRATEGIES
+# STRATEGY REGISTRY
 # ──────────────────────────────────────────────────────────────
 
-STRATEGIES = {
-    "RandomForest": random_forest_strategy
+STRATEGIES: dict[str, object] = {
+    "XGBoost": xgboost_strategy,
 }
 
-print("[strategies.py] RandomForest strategy loaded.")
+print("[strategies_ML.py] XGBoost strategy loaded.")

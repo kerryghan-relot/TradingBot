@@ -1,122 +1,176 @@
 """
-Récupération de 3 ans de données en 5min avec Twelve Data
-Stratégie : découpage en chunks de ~5000 bougies, puis concaténation en un seul CSV
+Fetch 3 years of 5-min OHLCV data from the Twelve Data API.
+============================================================
+
+Strategy: download in chunks of ~5 000 bars, resume if interrupted,
+then concatenate into a single sorted CSV.
+
+Requires the environment variable TWELVE_DATA_API_KEY.
 """
 
-import os
-import requests
 import csv
+import logging
+import os
 import time
-import pandas as pd
 from datetime import datetime, timedelta
 from pathlib import Path
 
-API_KEY            = os.getenv("TWELVE_DATA_API_KEY")
-INTERVAL           = "5min"
-BOUGIES_PAR_CHUNK  = 5000
-MINUTES_PAR_BOUGIE = 5
-PAUSE_ENTRE_APPELS = 15
+import pandas as pd
+import requests
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-8s %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
+
+API_KEY: str | None = os.getenv("TWELVE_DATA_API_KEY")
+INTERVAL: str = "5min"
+BARS_PER_CHUNK: int = 5_000
+MINUTES_PER_BAR: int = 5
+PAUSE_BETWEEN_CALLS: int = 15  # seconds (Twelve Data rate limit)
 
 
 def symbol_to_filename(symbol: str) -> str:
-    """Convertit un symbole en nom de fichier valide (ex: BTC/USD → BTC-USD)"""
+    """
+    Convert a ticker symbol to a safe filename stem.
+
+    Args:
+        symbol (str): Ticker, e.g. ``"BTC/USD"``.
+
+    Returns:
+        str: Filename-safe string, e.g. ``"BTC-USD"``.
+    """
     return symbol.replace("/", "-")
 
 
-def recuperer_historique(symbol: str):
+def fetch_history(symbol: str) -> None:
+    """
+    Download 3 years of 5-min bars for *symbol* and save to CSV.
+
+    Resumes from the last downloaded chunk when interrupted.
+    Chunk files are deleted after the final CSV is written.
+
+    Args:
+        symbol (str): Ticker accepted by the Twelve Data API,
+            e.g. ``"AAPL"`` or ``"BTC/USD"``.
+
+    Raises:
+        RuntimeError: On API error responses.
+    """
     data_dir = Path(__file__).resolve().parent.parent / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
 
-    safe_symbol   = symbol_to_filename(symbol)
-    dossier_chunks = data_dir / f"chunks_{safe_symbol}"
-    fichier_final  = data_dir / f"{safe_symbol}_5min_3ans.csv"
+    safe_symbol = symbol_to_filename(symbol)
+    chunk_dir = data_dir / f"chunks_{safe_symbol}"
+    final_file = data_dir / f"{safe_symbol}_5min_3ans.csv"
 
-    end_date   = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
+    end_date = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
     start_date = end_date - timedelta(days=3 * 365)
-
-    # La crypto trade 24/7 — pas de filtre sur les heures de marché
     is_crypto = "/" in symbol
 
-    print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    print(f"  {symbol} — {INTERVAL} — {start_date.date()} → {end_date.date()}")
-    print(f"  {'Crypto (24/7)' if is_crypto else 'Action'}")
-    print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    logger.info(
+        "%s — %s — %s → %s  (%s)",
+        symbol, INTERVAL, start_date.date(), end_date.date(),
+        "crypto 24/7" if is_crypto else "equity",
+    )
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-    dossier_chunks.mkdir(exist_ok=True)
+    chunk_dir.mkdir(exist_ok=True)
 
-    fichiers_chunks = []
+    chunk_files: list[Path] = []
     cursor = end_date
     i = 1
 
     while cursor > start_date:
-        nom_chunk = dossier_chunks / f"chunk_{i:03d}.csv"
+        chunk_path = chunk_dir / f"chunk_{i:03d}.csv"
 
-        if nom_chunk.exists():
-            # Lire le chunk pour retrouver la date la plus ancienne et repositionner le curseur
-            df_chunk = pd.read_csv(nom_chunk, parse_dates=["datetime"])
-            plus_ancien = df_chunk["datetime"].min()
-            cursor = plus_ancien - timedelta(minutes=MINUTES_PAR_BOUGIE)
-            print(f"  [{i}] chunk déjà présent, ignoré — curseur → {cursor.strftime('%Y-%m-%d %H:%M:%S')}")
-            fichiers_chunks.append(nom_chunk)
+        if chunk_path.exists():
+            df_chunk = pd.read_csv(chunk_path, parse_dates=["datetime"])
+            oldest = df_chunk["datetime"].min()
+            cursor = oldest - timedelta(minutes=MINUTES_PER_BAR)
+            logger.info(
+                "[%d] chunk already present — cursor → %s",
+                i, cursor.strftime("%Y-%m-%d %H:%M:%S"),
+            )
+            chunk_files.append(chunk_path)
             i += 1
             continue
 
-        print(f"  [{i}] jusqu'à {cursor.strftime('%Y-%m-%d %H:%M:%S')}...", end=" ", flush=True)
+        logger.info(
+            "[%d] fetching up to %s ...",
+            i, cursor.strftime("%Y-%m-%d %H:%M:%S"),
+        )
 
-        response = requests.get("https://api.twelvedata.com/time_series", params={
-            "symbol":     symbol,
-            "interval":   INTERVAL,
-            "end_date":   cursor.strftime("%Y-%m-%d %H:%M:%S"),
-            "apikey":     API_KEY,
-            "outputsize": BOUGIES_PAR_CHUNK,
-            "format":     "JSON",
-        })
-
+        response = requests.get(
+            "https://api.twelvedata.com/time_series",
+            params={
+                "symbol":     symbol,
+                "interval":   INTERVAL,
+                "end_date":   cursor.strftime("%Y-%m-%d %H:%M:%S"),
+                "apikey":     API_KEY,
+                "outputsize": BARS_PER_CHUNK,
+                "format":     "JSON",
+            },
+            timeout=30,
+        )
         data = response.json()
 
         if data.get("status") == "error":
-            print(f"\n  ✗ Erreur API : {data.get('message')}")
             raise RuntimeError(data.get("message"))
 
-        valeurs = data.get("values", [])
-
-        if not valeurs:
-            print("aucune donnée, ignorée")
-            cursor -= timedelta(minutes=MINUTES_PAR_BOUGIE)
+        values = data.get("values", [])
+        if not values:
+            logger.warning("[%d] no data returned, skipping", i)
+            cursor -= timedelta(minutes=MINUTES_PER_BAR)
             i += 1
             continue
 
-        with open(nom_chunk, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=["datetime", "open", "high", "low", "close", "volume"])
+        with open(chunk_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames=["datetime", "open", "high", "low", "close", "volume"],
+            )
             writer.writeheader()
-            writer.writerows(reversed(valeurs))
+            writer.writerows(reversed(values))
 
-        fichiers_chunks.append(nom_chunk)
-        print(f"✓ {len(valeurs)} bougies")
+        chunk_files.append(chunk_path)
+        logger.info("[%d] ✓ %d bars", i, len(values))
 
-        plus_ancien = datetime.strptime(valeurs[-1]["datetime"], "%Y-%m-%d %H:%M:%S")
-        cursor = plus_ancien - timedelta(minutes=MINUTES_PAR_BOUGIE)
+        oldest = datetime.strptime(values[-1]["datetime"], "%Y-%m-%d %H:%M:%S")
+        cursor = oldest - timedelta(minutes=MINUTES_PER_BAR)
         i += 1
 
-        time.sleep(PAUSE_ENTRE_APPELS)
+        time.sleep(PAUSE_BETWEEN_CALLS)
 
-    print(f"\nConcaténation de {len(fichiers_chunks)} fichiers...")
+    # ── Concatenate chunks ───────────────────────────────────────
+    logger.info("Concatenating %d chunks...", len(chunk_files))
 
-    dfs = [pd.read_csv(f, parse_dates=["datetime"]) for f in fichiers_chunks]
+    dfs = [pd.read_csv(f, parse_dates=["datetime"]) for f in chunk_files]
     df_final = pd.concat(dfs, ignore_index=True)
     df_final = df_final.drop_duplicates(subset="datetime")
     df_final = df_final.sort_values("datetime").reset_index(drop=True)
-    df_final.to_csv(fichier_final, index=False)
+    df_final.to_csv(final_file, index=False)
 
-    print(f"✓ {len(df_final):,} bougies au total")
-    print(f"  Période réelle : {df_final['datetime'].iloc[0]} → {df_final['datetime'].iloc[-1]}")
-    print(f"  Fichier final  : {fichier_final}")
+    logger.info("✓ %d bars total", len(df_final))
+    logger.info(
+        "  Period: %s → %s",
+        df_final["datetime"].iloc[0],
+        df_final["datetime"].iloc[-1],
+    )
+    logger.info("  File: %s", final_file)
 
-    for f in fichiers_chunks:
+    for f in chunk_files:
         f.unlink()
-    dossier_chunks.rmdir()
-    print("✓ Terminé.")
+    chunk_dir.rmdir()
+    logger.info("✓ Done.")
+
+
+# Keep the old name as an alias for backwards compatibility
+recuperer_historique = fetch_history
 
 
 if __name__ == "__main__":
-    recuperer_historique("AAPL")
+    fetch_history("AAPL")

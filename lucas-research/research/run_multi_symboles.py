@@ -1,41 +1,51 @@
 """
-Lance la récupération Twelve Data pour une liste d'actions.
-Prérequis : twelve_data_5min_3ans.py dans le même dossier.
+Batch download of 5-min bars from Twelve Data for a list of symbols.
+
+Requires twelve_data_5min_3ans.py in the same directory and the
+TWELVE_DATA_API_KEY environment variable to be set.
 """
 
+import logging
 from datetime import datetime
-from twelve_data_5min_3ans import recuperer_historique
 
-# ── Liste des symboles à télécharger ──────────────────────────
-SYMBOLES = [
-   
-    # ── Cryptocurrencies ─────────────────────────────────────────────────
-    "BTC/USD", # Bitcoin
-    "ETH/USD", # Ethereum
+from twelve_data_5min_3ans import fetch_history
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-8s %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
+
+# ── Symbols to download ──────────────────────────────────────────
+SYMBOLS: list[str] = [
+    # Cryptocurrencies
+    "BTC/USD",
+    "ETH/USD",
 ]
-# ── Boucle principale ──────────────────────────────────────────
-succes = []
-echecs = []
-debut_global = datetime.now()
 
-print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-print(f"  {len(SYMBOLES)} actions à télécharger")
-print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+# ── Main loop ────────────────────────────────────────────────────
+succeeded: list[str] = []
+failed: list[str] = []
+t_start = datetime.now()
 
-for idx, symbol in enumerate(SYMBOLES, 1):
-    print(f"\n[{idx}/{len(SYMBOLES)}] Démarrage de {symbol}...")
+logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+logger.info("%d symbols to download", len(SYMBOLS))
+logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+for idx, symbol in enumerate(SYMBOLS, 1):
+    logger.info("[%d/%d] Starting %s...", idx, len(SYMBOLS), symbol)
     try:
-        recuperer_historique(symbol)
-        succes.append(symbol)
-    except Exception as e:
-        print(f"  ✗ {symbol} a échoué : {e}")
-        echecs.append(symbol)
+        fetch_history(symbol)
+        succeeded.append(symbol)
+    except Exception as exc:
+        logger.error("  ✗ %s failed: %s", symbol, exc)
+        failed.append(symbol)
 
-# ── Résumé ─────────────────────────────────────────────────────
-duree = datetime.now() - debut_global
-print(f"\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-print(f"  Terminé en {str(duree).split('.')[0]}")
-print(f"  ✓ Succès : {len(succes)} — {', '.join(succes)}")
-if echecs:
-    print(f"  ✗ Échecs : {len(echecs)} — {', '.join(echecs)}")
-print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+duration = datetime.now() - t_start
+logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+logger.info("Done in %s", str(duration).split(".")[0])
+logger.info("✓ Success: %d — %s", len(succeeded), ", ".join(succeeded))
+if failed:
+    logger.warning("✗ Failed:  %d — %s", len(failed), ", ".join(failed))
+logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
