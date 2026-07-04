@@ -417,12 +417,12 @@ def _sig_kalman_zscore(df: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
 SIGNALS: dict[str, Callable[[pd.DataFrame], tuple[pd.Series, pd.Series]]] = {
     # ── Original signals ──────────────────────────────────────
     # "RSI":          _sig_rsi,
-    "BB":           _sig_bollinger,
-    "EMA_Cross":    _sig_ema_cross,
-    "MACD_Zero":    _sig_macd_zero,
+    #2"BB":           _sig_bollinger,
+    #2"EMA_Cross":    _sig_ema_cross,
+    #2"MACD_Zero":    _sig_macd_zero,
     # "MACD_Sig":     _sig_macd_signal,
     # "EMA_Trend":    _sig_ema_trend,
-    "Zscore":       _sig_zscore,
+    #2"Zscore":       _sig_zscore,
     # "BB_Squeeze":   _sig_bb_squeeze,
     # "Donchian":     _sig_donchian,
     # "RSI_Slope":    _sig_rsi_slope,

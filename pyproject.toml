@@ -20,4 +20,5 @@ dependencies = [
     "requests>=2.34.2",
     "streamlit>=1.57.0",
     "vectorbt>=0.28.2",
+    "xgboost>=3.2.0",
 ]
