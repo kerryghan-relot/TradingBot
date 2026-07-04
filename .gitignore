@@ -3,6 +3,12 @@ ETH-USD_5min_3ans.csv
 data/
 resultats/
 
+# lucas-live-trading runtime state (auto-generated at first run)
+lucas-live-trading/bars.db
+lucas-live-trading/config.json
+lucas-live-trading/backups/
+lucas-live-trading/scorer_task.log
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

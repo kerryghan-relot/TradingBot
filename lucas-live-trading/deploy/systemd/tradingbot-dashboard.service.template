@@ -1,0 +1,25 @@
+[Unit]
+Description=TradingBot Streamlit dashboard
+After=network-online.target tradingbot-bot.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__DEPLOY_USER__
+WorkingDirectory=__REPO_DIR__
+ExecStart=__REPO_DIR__/.venv/bin/streamlit run lucas-live-trading/dashboard.py \
+    --server.address 127.0.0.1 \
+    --server.port 8501 \
+    --server.headless true \
+    --browser.gatherUsageStats false
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+# Only reachable via Nginx on 127.0.0.1 — never bind 0.0.0.0 here.
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

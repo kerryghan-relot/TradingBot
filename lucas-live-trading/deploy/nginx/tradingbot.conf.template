@@ -1,0 +1,42 @@
+# Reverse proxy for the TradingBot Streamlit dashboard.
+# Terminates TLS (self-signed until a domain is configured) and gates
+# access with HTTP basic auth, since Streamlit has no auth of its own
+# and exposes a write endpoint (config.json editor).
+
+server {
+    listen 80;
+    server_name _;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name _;
+
+    ssl_certificate     /etc/nginx/ssl/tradingbot.crt;
+    ssl_certificate_key /etc/nginx/ssl/tradingbot.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+
+    auth_basic           "TradingBot Dashboard";
+    auth_basic_user_file /etc/nginx/.htpasswd-tradingbot;
+
+    location / {
+        proxy_pass http://127.0.0.1:8501;
+
+        # Streamlit's UI is driven over a websocket — without the
+        # Upgrade/Connection headers the dashboard loads once and then
+        # never updates (no reruns, no auto-refresh, no button clicks).
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Long-lived websocket — default 60s proxy_read_timeout would
+        # silently drop idle dashboard sessions.
+        proxy_read_timeout 86400;
+    }
+}
