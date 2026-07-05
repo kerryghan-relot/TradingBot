@@ -77,11 +77,20 @@ LOG_FILE:    Path = Path(__file__).parent / "scorer.log"
 # at import time and creates Alpaca clients).
 _BOT_DEFAULTS: dict = {
     "symbols": list(SYMBOLS),   # own copy — never mutate SYMBOLS constant
+    # Capital & sizing — mirrors bot.py DEFAULT_CONFIG.  The scorer
+    # ranks by per-bar return (size-independent), so these do not affect
+    # the ranking; they are kept here only so the merged config round-
+    # trips every key the bot expects.
+    "total_capital":      100000.0,
+    "sizing_mode":        "confidence",
+    "min_position_pct":   0.05,
+    "max_position_pct":   0.20,
     "order_qty":          {"BTC": 0.001, "ETH": 0.01},
     "order_qty_default":  1,
     "order_dollar_value": 500,  # kept in sync with bot.py DEFAULT_CONFIG
     "stop_loss_pct":      0.02,
     "max_open_positions": 10,   # kept in sync with bot.py DEFAULT_CONFIG
+    "backfill_days":      7,    # kept in sync with bot.py DEFAULT_CONFIG
     "vote_threshold":     2,
     "active_signals":    ["BB", "OU", "VWAP", "VolSpike", "KalmanZ"],
     "bb_period":         200,

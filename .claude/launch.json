@@ -1,0 +1,18 @@
+{
+    "version": "0.0.1",
+    "configurations": [
+        {
+            "name": "dashboard",
+            "runtimeExecutable": ".venv/Scripts/python.exe",
+            "runtimeArgs": [
+                "-m", "streamlit", "run",
+                "lucas-live-trading/dashboard.py",
+                "--server.headless", "true",
+                "--server.port", "8502",
+                "--browser.gatherUsageStats", "false"
+            ],
+            "port": 8502,
+            "autoPort": false
+        }
+    ]
+}

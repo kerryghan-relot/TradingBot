@@ -448,7 +448,18 @@ def page_charts(symbols: list[str], cfg: dict) -> None:
 
 
 def page_votes(symbols: list[str], positions: list[dict]) -> None:
-    """Show current vote state for every active symbol."""
+    """Rank symbols by how close each is to a buy/sell trigger.
+
+    The bot acts when the vote count reaches ``vote_threshold``: a BUY
+    when flat, a SELL when holding.  For each symbol this computes the
+    number of votes still missing for its *relevant* action (buy if
+    flat, sell if held) and sorts so the symbols about to trade appear
+    first.  A per-symbol card view remains available below for detail.
+
+    Args:
+        symbols   (list[str]): Symbols currently selected for display.
+        positions (list[dict]): Open Alpaca positions (for the 📦 flag).
+    """
     latest = get_latest_indicators()
     in_pos = {p["symbol"] for p in positions}
 
@@ -456,35 +467,124 @@ def page_votes(symbols: list[str], positions: list[dict]) -> None:
         st.info("Aucun indicateur en base — le bot n'a pas encore tourné.")
         return
 
-    cols = st.columns(min(len(symbols), 5))
-    for i, symbol in enumerate(symbols):
+    cfg       = load_config()
+    threshold = int(cfg.get("vote_threshold", 2))
+
+    # ── Build the proximity ranking ───────────────────────────────────────
+    records: list[dict] = []
+    for symbol in symbols:
         row = latest[latest["symbol"] == symbol]
-        col = cols[i % len(cols)]
-        with col:
-            if row.empty:
-                st.metric(symbol, "—", "pas de données")
-                continue
+        if row.empty:
+            continue
+        r       = row.iloc[0]
+        buy_v   = int(r.get("buy_votes",  0))
+        sell_v  = int(r.get("sell_votes", 0))
+        n_sigs  = int(r.get("n_signals",  1)) or 1
+        close   = float(r.get("close", 0))
+        holding = symbol in in_pos
 
-            r          = row.iloc[0]
-            signal     = r.get("signal", "HOLD")
-            buy_v      = int(r.get("buy_votes",  0))
-            sell_v     = int(r.get("sell_votes", 0))
-            n_sigs     = int(r.get("n_signals",  1)) or 1
-            close      = float(r.get("close", 0))
-            holding    = symbol in in_pos
+        # Only the action allowed by the current position state matters:
+        # you can only BUY when flat, only SELL when holding.
+        action = "VENTE" if holding else "ACHAT"
+        votes  = sell_v if holding else buy_v
+        gap    = max(0, threshold - votes)
 
-            color = {"BUY": "🟢", "SELL": "🔴", "HOLD": "⚪"}.get(signal, "⚪")
-            pos_badge = " 📦" if holding else ""
-
-            st.markdown(
-                f"**{symbol}**{pos_badge}  "
-                f"{color} **{signal}**  \n"
-                f"`B {buy_v}/{n_sigs}`  `S {sell_v}/{n_sigs}`  \n"
-                f"${close:,.4f}"
+        if gap == 0:
+            etat = (
+                "🔴 VENTE imminente" if holding
+                else "🟢 ACHAT imminent"
             )
-            # Mini progress bar for buy vs sell
-            buy_pct = buy_v / n_sigs
-            st.progress(buy_pct, text=f"Buy {buy_pct*100:.0f}%")
+        elif gap == 1:
+            etat = f"🟡 proche ({action})"
+        else:
+            etat = "⚪ loin"
+
+        proche = (
+            f"{action} déclenché" if gap == 0
+            else f"{action} — {gap} vote(s) manquant(s)"
+        )
+        records.append({
+            "_gap":      gap,
+            "_conv":     votes / n_sigs,
+            "Symbole":   f"{symbol}{' 📦' if holding else ''}",
+            "État":      etat,
+            "Prix":      f"${close:,.2f}",
+            "Achat":     f"{buy_v}/{n_sigs}",
+            "Vente":     f"{sell_v}/{n_sigs}",
+            "Conviction": f"{votes / n_sigs * 100:.0f}%",
+            "Proche de": proche,
+        })
+
+    if not records:
+        st.info("Aucune donnée pour les symboles sélectionnés.")
+        return
+
+    df = pd.DataFrame(records).sort_values(
+        ["_gap", "_conv"], ascending=[True, False]
+    ).reset_index(drop=True)
+
+    # ── Summary KPIs ──────────────────────────────────────────────────────
+    c1, c2, c3 = st.columns(3)
+    c1.metric("🎯 Déclenchements imminents", int((df["_gap"] == 0).sum()))
+    c2.metric("🟡 Proches (1 vote)", int((df["_gap"] == 1).sum()))
+    c3.metric("Seuil de vote", f"{threshold} signaux")
+
+    display = df.drop(columns=["_gap", "_conv"])
+
+    def _color_row(r: pd.Series) -> list[str]:
+        etat = r["État"]
+        if "imminent" in etat:
+            bg = ("rgba(38,166,65,0.28)" if "ACHAT" in etat
+                  else "rgba(224,82,82,0.28)")
+        elif "proche" in etat:
+            bg = "rgba(240,200,80,0.16)"
+        else:
+            bg = ""
+        return [f"background-color: {bg}"] * len(r)
+
+    st.dataframe(
+        display.style.apply(_color_row, axis=1),
+        width="stretch",
+        hide_index=True,
+    )
+    st.caption(
+        "Trié du plus proche d'un ordre au plus loin. "
+        "« Achat »/« Vente » = votes actuels sur le nombre de signaux ; "
+        "l'action se déclenche à partir du seuil."
+    )
+
+    # ── Per-symbol card detail (collapsed) ────────────────────────────────
+    with st.expander("🔍 Détail par symbole"):
+        cols = st.columns(min(len(symbols), 5))
+        for i, symbol in enumerate(symbols):
+            row = latest[latest["symbol"] == symbol]
+            col = cols[i % len(cols)]
+            with col:
+                if row.empty:
+                    st.metric(symbol, "—", "pas de données")
+                    continue
+
+                r          = row.iloc[0]
+                signal     = r.get("signal", "HOLD")
+                buy_v      = int(r.get("buy_votes",  0))
+                sell_v     = int(r.get("sell_votes", 0))
+                n_sigs     = int(r.get("n_signals",  1)) or 1
+                close      = float(r.get("close", 0))
+                holding    = symbol in in_pos
+
+                color = {"BUY": "🟢", "SELL": "🔴", "HOLD": "⚪"}.get(
+                    signal, "⚪"
+                )
+                pos_badge = " 📦" if holding else ""
+
+                st.markdown(
+                    f"**{symbol}**{pos_badge}  "
+                    f"{color} **{signal}**  \n"
+                    f"`B {buy_v}/{n_sigs}`  `S {sell_v}/{n_sigs}`  \n"
+                    f"${close:,.4f}"
+                )
+                buy_pct = buy_v / n_sigs
+                st.progress(buy_pct, text=f"Buy {buy_pct*100:.0f}%")
 
 
 def page_history() -> None:
@@ -672,7 +772,7 @@ def main() -> None:
 
         selected_symbols = st.multiselect(
             "Symboles affichés", all_symbols,
-            default=all_symbols[:10],
+            default=all_symbols,
         )
 
         st.divider()

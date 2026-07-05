@@ -43,15 +43,19 @@ import sqlite3
 import logging
 import os
 import time
-from datetime import datetime, UTC
+from datetime import datetime, timedelta, UTC
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 from alpaca.data.enums import DataFeed
+from alpaca.data.historical.crypto import CryptoHistoricalDataClient
+from alpaca.data.historical.stock import StockHistoricalDataClient
 from alpaca.data.live.crypto import CryptoDataStream
 from alpaca.data.live.stock import StockDataStream
+from alpaca.data.requests import CryptoBarsRequest, StockBarsRequest
+from alpaca.data.timeframe import TimeFrame
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.trading.requests import MarketOrderRequest
@@ -153,7 +157,23 @@ DEFAULT_CONFIG: dict = {
     # can accidentally mutate the shared SYMBOLS constant.
     "symbols": list(SYMBOLS),
 
-    # Position sizing
+    # ── Capital & position sizing ─────────────────────────────────────
+    # total_capital is the budget the bot manages itself: it never lets
+    # the summed cost basis of open positions exceed this.  Set to match
+    # the Alpaca paper account's default $100k starting balance so the
+    # bot budget and the account equity line up.
+    "total_capital": 100000.0,    # total budget in USD the bot deploys
+    # sizing_mode:
+    #   "confidence" → each BUY is sized between min_position_pct and
+    #                  max_position_pct of total_capital, scaled by how
+    #                  strongly the signals agree (vote conviction).
+    #   "fixed"      → legacy behaviour (order_qty / order_dollar_value).
+    "sizing_mode":       "confidence",
+    "min_position_pct":  0.05,    # 5 % of capital at the vote threshold
+    "max_position_pct":  0.20,    # 20 % of capital at full agreement
+
+    # Legacy fixed-sizing knobs (used only when sizing_mode == "fixed",
+    # and as the SELL fallback for positions with no recorded quantity).
     # Priority: order_qty (per-ticker) > order_dollar_value > order_qty_default
     "order_qty":          {"BTC": 0.001, "ETH": 0.01},
     "order_qty_default":  1,      # fallback qty for stocks (shares)
@@ -161,6 +181,13 @@ DEFAULT_CONFIG: dict = {
                                   # (0 = disable, use order_qty_default)
     "stop_loss_pct":      0.02,   # 2 % drop from entry triggers exit
     "max_open_positions": 10,     # hard cap on simultaneous positions
+
+    # ── Startup backfill ──────────────────────────────────────────────
+    # On launch, fetch this many days of 1-min bars from Alpaca into
+    # bars.db so the rolling windows preload fresh, continuous history
+    # and the strategy can trade soundly from the first live bar.
+    # 0 disables backfill (use only whatever is already in bars.db).
+    "backfill_days": 7,
 
     # Vote aggregation
     "vote_threshold":  2,
@@ -535,6 +562,10 @@ class AssetState(SignalState):
         symbol      (str): Full symbol string, e.g. ``"BTC/USD"``.
         in_position (bool): Whether the bot currently holds this asset.
         entry_price (float | None): Close at which the position opened.
+        entry_qty   (float | None): Quantity held (in asset units).
+            Needed to close the exact position on SELL — with
+            confidence sizing the buy quantity varies per trade, so we
+            can no longer re-derive it, and to track deployed capital.
     """
 
     def __init__(self, symbol: str) -> None:
@@ -542,6 +573,7 @@ class AssetState(SignalState):
         self.symbol:      str          = symbol
         self.in_position: bool         = False
         self.entry_price: float | None = None
+        self.entry_qty:   float | None = None
 
     @property
     def ticker(self) -> str:
@@ -624,11 +656,98 @@ class CryptoBot:
         init_db(self.conn)
         # Initialise before any method that might eventually call _reload_config.
         self._last_config_reload: float = 0.0
+        self._backfill_history()
         self._preload_from_db()
         self._restore_positions()
         self._log_config("🤖 Bot started")
 
     # ── Startup ───────────────────────────────────────────────────────────────
+
+    def _backfill_history(self) -> None:
+        """Backfill recent 1-min bars from Alpaca so the bot starts warmed up.
+
+        Fetches the last ``backfill_days`` of history for every symbol
+        and stores it in ``bars.db`` (``INSERT OR IGNORE`` — existing
+        rows are untouched).  Runs *before* ``_preload_from_db`` so the
+        rolling windows load fresh, continuous data: the strategy can
+        then trade soundly from the first live bar at market open,
+        instead of computing indicators over stale history (or waiting
+        hours to accumulate a full window from scratch).
+
+        Bars are inserted in one batch per symbol (a single commit) —
+        a per-row commit over a week of 1-min data would be far too
+        slow.  Network or auth failures are logged and swallowed: the
+        bot falls back to whatever history is already in ``bars.db``.
+        """
+        days = int(self.cfg.get("backfill_days", 0))
+        if days <= 0:
+            return
+
+        end   = datetime.now(UTC)
+        start = end - timedelta(days=days)
+        log.info(f"⬇️  Backfill {days} j d'historique depuis Alpaca…")
+
+        crypto_client: CryptoHistoricalDataClient | None = None
+        stock_client:  StockHistoricalDataClient | None = None
+        total = 0
+
+        for symbol in self.assets:
+            try:
+                if _is_crypto(symbol):
+                    if crypto_client is None:
+                        crypto_client = CryptoHistoricalDataClient(
+                            API_KEY, API_SECRET
+                        )
+                    bar_set = crypto_client.get_crypto_bars(
+                        CryptoBarsRequest(
+                            symbol_or_symbols = symbol,
+                            timeframe         = TimeFrame.Minute,
+                            start             = start,
+                            end               = end,
+                        )
+                    )
+                else:
+                    if stock_client is None:
+                        stock_client = StockHistoricalDataClient(
+                            API_KEY, API_SECRET
+                        )
+                    bar_set = stock_client.get_stock_bars(
+                        StockBarsRequest(
+                            symbol_or_symbols = symbol,
+                            timeframe         = TimeFrame.Minute,
+                            start             = start,
+                            end               = end,
+                            feed              = DataFeed.IEX,
+                        )
+                    )
+                bars = bar_set.data.get(symbol, [])
+            except Exception as exc:
+                log.warning(f"⚠️  {symbol}: backfill échoué — {exc}")
+                continue
+
+            rows = [
+                (
+                    symbol,
+                    b.timestamp.isoformat(),
+                    float(b.open), float(b.high), float(b.low),
+                    float(b.close), float(b.volume),
+                )
+                for b in bars
+            ]
+            if rows:
+                self.conn.executemany(
+                    """
+                    INSERT OR IGNORE INTO bars
+                        (symbol, timestamp, open, high, low, close, volume)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    rows,
+                )
+                self.conn.commit()
+            total += len(rows)
+            log.info(f"   {symbol}: {len(rows)} bars")
+
+        log.info(f"⬇️  Backfill terminé ({total} bars).")
 
     def _preload_from_db(self) -> None:
         """Restore rolling windows for all assets from persisted bar history.
@@ -676,6 +795,7 @@ class CryptoBot:
                 continue
             self.assets[symbol].in_position = True
             self.assets[symbol].entry_price = float(p.avg_entry_price)
+            self.assets[symbol].entry_qty   = float(p.qty)
             log.info(
                 f"💼 {symbol}: position restored  "
                 f"(qty={p.qty}  entry={p.avg_entry_price})"
@@ -756,8 +876,9 @@ class CryptoBot:
                     f"🔀 {asset.ticker}: sorti de la sélection — "
                     f"liquidation de la position"
                 )
+                rot_qty = self._sell_qty(asset, close)
                 if not self.place_order(
-                    asset, OrderSide.SELL, close, "rotation"
+                    asset, OrderSide.SELL, close, "rotation", rot_qty
                 ):
                     log.warning(
                         f"⚠️  {asset.ticker}: liquidation échouée — "
@@ -815,12 +936,23 @@ class CryptoBot:
         """
         cfg    = self.cfg
         active = cfg.get("active_signals", [])
+        mode   = cfg.get("sizing_mode", "confidence")
+        if mode == "confidence":
+            sizing = (
+                f"confiance {cfg.get('min_position_pct', 0) * 100:.0f}–"
+                f"{cfg.get('max_position_pct', 0) * 100:.0f}% "
+                f"de {cfg.get('total_capital', 0):.0f}$"
+            )
+        else:
+            sizing = f"fixe ({cfg.get('order_dollar_value', 0):.0f}$/trade)"
         log.info(
             f"{label}\n"
             f"   Crypto  : {self._crypto_syms or '(none)'}  |  paper={PAPER}\n"
             f"   Stocks  : {self._stock_syms or '(none)'}\n"
             f"   Signals : {active}\n"
             f"   Threshold: {cfg['vote_threshold']} / {len(active)}\n"
+            f"   Capital : {cfg.get('total_capital', 0):.0f}$  |  "
+            f"sizing: {sizing}\n"
             f"   Stop-loss: {cfg['stop_loss_pct'] * 100:.0f}%\n"
         )
 
@@ -856,17 +988,107 @@ class CryptoBot:
             return qty if _is_crypto(symbol) else max(1.0, round(qty))
         return float(self.cfg.get("order_qty_default", 1))
 
+    def _deployed_capital(self) -> float:
+        """Return the summed cost basis of all open positions in USD.
+
+        Cost basis (``entry_price × entry_qty``), not current market
+        value — this is the cash the bot has committed and must not
+        exceed ``total_capital``.
+
+        Returns:
+            float: Total USD currently deployed across open positions.
+        """
+        return sum(
+            (a.entry_price or 0.0) * (a.entry_qty or 0.0)
+            for a in self.assets.values()
+            if a.in_position
+        )
+
+    def _buy_qty(
+        self, symbol: str, close: float, buy_votes: int, n_signals: int
+    ) -> float:
+        """Return the BUY quantity for the current bar.
+
+        In ``"confidence"`` sizing mode the dollar amount scales with
+        vote conviction: a trade that only just clears the threshold
+        gets ``min_position_pct`` of ``total_capital``; one where every
+        signal agrees gets ``max_position_pct``.  The amount is then
+        clamped to the capital still available (``total_capital`` minus
+        the cost basis already deployed), so the bot never exceeds its
+        budget.  Stock quantities are fractional (Alpaca supports
+        fractional market orders) so small budgets size correctly.
+
+        In ``"fixed"`` mode this defers to ``_order_qty`` (legacy).
+
+        Args:
+            symbol    (str): Asset symbol.
+            close     (float): Current bar close price.
+            buy_votes (int): Signals that voted BUY on this bar.
+            n_signals (int): Total active signals evaluated.
+
+        Returns:
+            float: Quantity to buy in asset units.  ``0.0`` when the
+                budget is exhausted or the price is unusable — the
+                caller must skip the trade.
+        """
+        cfg = self.cfg
+        if cfg.get("sizing_mode", "confidence") != "confidence":
+            return self._order_qty(symbol, close)
+        if close <= 0 or n_signals <= 0:
+            return 0.0
+
+        # Conviction in [0, 1]: 0 at the vote threshold, 1 at unanimity.
+        threshold = int(cfg.get("vote_threshold", 2))
+        span      = max(n_signals - threshold, 1)
+        conviction = min(1.0, max(0.0, (buy_votes - threshold) / span))
+
+        min_pct  = float(cfg.get("min_position_pct", 0.05))
+        max_pct  = float(cfg.get("max_position_pct", 0.20))
+        fraction = min_pct + conviction * (max_pct - min_pct)
+
+        total     = float(cfg.get("total_capital", 1000.0))
+        available = max(0.0, total - self._deployed_capital())
+        dollars   = min(fraction * total, available)
+        if dollars < 1.0:            # Alpaca fractional min notional ≈ $1
+            return 0.0
+
+        qty = dollars / close
+        # Whole units would break tiny budgets on pricey shares, so keep
+        # fractional precision for stocks too (rounded to avoid API
+        # rejections on over-precise quantities).
+        return qty if _is_crypto(symbol) else round(qty, 4)
+
+    def _sell_qty(self, asset: AssetState, close: float) -> float:
+        """Return the quantity to sell to fully close a position.
+
+        Uses the recorded ``entry_qty`` so the exit matches the entry
+        exactly.  Falls back to ``_order_qty`` only for positions with
+        no recorded quantity (e.g. restored from Alpaca before the
+        quantity was known).
+
+        Args:
+            asset (AssetState): Asset being sold.
+            close (float): Current bar close price (for the fallback).
+
+        Returns:
+            float: Quantity to sell in asset units.
+        """
+        if asset.entry_qty is not None:
+            return asset.entry_qty
+        return self._order_qty(asset.symbol, close)
+
     def place_order(
         self,
         asset: AssetState,
         side:  OrderSide,
         close: float,
         reason: str,
+        qty:    float,
     ) -> bool:
         """Submit a market order via the Alpaca trading API.
 
-        Updates ``asset.entry_price`` on a successful BUY (set to
-        ``close``) or SELL (reset to ``None``), and records the trade
+        Updates ``asset.entry_price`` / ``asset.entry_qty`` on a
+        successful BUY, resets them on SELL, and records the trade
         (with realised P&L on SELL) in the ``trades`` table.  Returns
         ``False`` without raising on failure — the bot continues
         running.
@@ -876,6 +1098,10 @@ class CryptoBot:
             side   (OrderSide) : ``OrderSide.BUY`` or ``OrderSide.SELL``.
             close  (float)     : Current bar's closing price.
             reason (str)       : Trigger description logged with order.
+            qty    (float)     : Quantity to trade in asset units.  BUYs
+                are confidence-sized by the caller; SELLs pass the full
+                held quantity (``entry_qty``) so the position closes
+                exactly.
 
         Returns:
             bool: ``True`` if Alpaca accepted the order, ``False`` on
@@ -887,7 +1113,6 @@ class CryptoBot:
             TimeInForce.GTC if _is_crypto(asset.symbol)
             else TimeInForce.DAY
         )
-        qty = self._order_qty(asset.symbol, close)
         try:
             order = self.trading_client.submit_order(
                 MarketOrderRequest(
@@ -930,7 +1155,12 @@ class CryptoBot:
             # Order is already live — never let a DB error kill the bot.
             log.error(f"    ⚠️ {asset.ticker} trade not persisted: {e}")
 
-        asset.entry_price = close if side == OrderSide.BUY else None
+        if side == OrderSide.BUY:
+            asset.entry_price = close
+            asset.entry_qty   = qty
+        else:
+            asset.entry_price = None
+            asset.entry_qty   = None
         return True
 
     # ── Signal engine ─────────────────────────────────────────────────────────
@@ -980,7 +1210,10 @@ class CryptoBot:
                     f"🛑 STOP-LOSS ({drop * 100:.1f}% drop)  "
                     f"close={close:.2f}"
                 )
-                if self.place_order(asset, OrderSide.SELL, close, "stop-loss"):
+                sl_qty = self._sell_qty(asset, close)
+                if self.place_order(
+                    asset, OrderSide.SELL, close, "stop-loss", sl_qty
+                ):
                     asset.in_position = False
                     # Persist stop-loss exits so the dashboard shows them
                     save_indicators(
@@ -1018,18 +1251,36 @@ class CryptoBot:
         open_count = sum(1 for a in self.assets.values() if a.in_position)
 
         if buy and not asset.in_position:
+            buy_qty = self._buy_qty(asset.symbol, close, buy_votes, n_sigs)
             if open_count >= max_pos:
                 log.info(
                     f"{log_line}  →  BUY blocked "
                     f"(max {max_pos} positions reached)"
                 )
-            elif self.place_order(asset, OrderSide.BUY, close, "vote"):
+            elif buy_qty <= 0:
+                log.info(
+                    f"{log_line}  →  BUY blocked "
+                    f"(budget {cfg.get('total_capital', 0):.0f}$ épuisé)"
+                )
+            elif self.place_order(
+                asset, OrderSide.BUY, close, "vote", buy_qty
+            ):
                 asset.in_position = True
                 signal_label      = "BUY"
-                log.info(f"{log_line}  →  BUY")
+                conv_pct = (
+                    buy_votes / n_sigs * 100 if n_sigs else 0.0
+                )
+                log.info(
+                    f"{log_line}  →  BUY  "
+                    f"qty={buy_qty:g} (~{buy_qty * close:.0f}$, "
+                    f"conf {conv_pct:.0f}%)"
+                )
 
         elif sell and asset.in_position:
-            if self.place_order(asset, OrderSide.SELL, close, "vote"):
+            sell_qty = self._sell_qty(asset, close)
+            if self.place_order(
+                asset, OrderSide.SELL, close, "vote", sell_qty
+            ):
                 asset.in_position = False
                 signal_label      = "SELL"
                 log.info(f"{log_line}  →  SELL")
