@@ -1,5 +1,5 @@
 """
-Vote-based multi-asset trading bot — lucas-live-trading
+Vote-based multi-asset trading bot — lucas-trading/live
 ========================================================
 Assets  : configurable via ``config.json["symbols"]``
           (defaults: all 30 research symbols — 28 US stocks/ETFs +
@@ -26,7 +26,7 @@ Active signals and all thresholds live in ``config.json`` and are
 hot-reloaded on every bar tick — no restart required.
 
 Database  : bars.db  (SQLite, auto-created on first run)
-Config    : config.json (hot-reloaded every bar)
+Config    : config/config.json (hot-reloaded every bar)
 Log       : bot.log (rotating, 5 MB per file, 3 backups)
 
 Requirements:
@@ -38,65 +38,36 @@ Environment variables (.env):
 """
 
 import asyncio
-import json
 import sqlite3
 import logging
-import os
 import time
 from datetime import datetime, timedelta, UTC
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from dotenv import load_dotenv
-
 from alpaca.data.enums import DataFeed
-from alpaca.data.historical.crypto import CryptoHistoricalDataClient
-from alpaca.data.historical.stock import StockHistoricalDataClient
 from alpaca.data.live.crypto import CryptoDataStream
 from alpaca.data.live.stock import StockDataStream
-from alpaca.data.requests import CryptoBarsRequest, StockBarsRequest
-from alpaca.data.timeframe import TimeFrame
-from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.trading.requests import MarketOrderRequest
 
-from constants import SYMBOLS
-from engine import DEQUE_SIZE, SignalState, evaluate_bar
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _is_crypto(symbol: str) -> bool:
-    """Return True if the symbol is a crypto pair (contains ``/``).
-
-    Alpaca crypto symbols use slash notation (``"BTC/USD"``); US stock
-    tickers never contain a slash (``"AAPL"``).
-
-    Args:
-        symbol (str): Asset identifier.
-
-    Returns:
-        bool: ``True`` for crypto, ``False`` for stocks/ETFs.
-    """
-    return "/" in symbol
+from core.broker import (
+    API_KEY,
+    API_SECRET,
+    PAPER,
+    fetch_bars,
+    is_crypto,
+    make_data_clients,
+    make_trading_client,
+)
+from core.config import DEFAULT_CONFIG, load_config
+from core.constants import CONFIG_FILE, DB_FILE, ROOT_DIR
+from core.engine import DEQUE_SIZE, SignalState, evaluate_bar
 
 
 # ── Static config (restart required to change) ────────────────────────────────
 
-load_dotenv()
-
-API_KEY:    str | None = os.getenv("ALPACA_API_KEY")
-API_SECRET: str | None = os.getenv("ALPACA_SECRET_KEY")
-if not API_KEY or not API_SECRET:
-    raise RuntimeError(
-        "Missing ALPACA_API_KEY or ALPACA_SECRET_KEY in .env"
-    )
-
-PAPER: bool = True   # True = paper trading, False = live
-
-CONFIG_FILE: Path = Path(__file__).parent / "config.json"
-DB_FILE:     Path = Path(__file__).parent / "bars.db"
-LOG_FILE:    Path = Path(__file__).parent / "bot.log"
+LOG_FILE: Path = ROOT_DIR / "bot.log"
 
 # DEQUE_SIZE (rolling-window capacity) lives in engine.py — shared
 # with scorer.py so live bot and simulation always match.
@@ -145,126 +116,6 @@ def setup_logging() -> logging.Logger:
 
 
 log: logging.Logger = setup_logging()
-
-
-# ── Default hyperparameters ────────────────────────────────────────────────────
-
-DEFAULT_CONFIG: dict = {
-    # Traded symbols — sourced from constants.py (single source of truth).
-    # Hot-reloaded: edits to config.json["symbols"] (e.g. by scorer.py)
-    # are applied live — see CryptoBot._apply_symbols().
-    # list() ensures DEFAULT_CONFIG holds its own copy so that nothing
-    # can accidentally mutate the shared SYMBOLS constant.
-    "symbols": list(SYMBOLS),
-
-    # ── Capital & position sizing ─────────────────────────────────────
-    # total_capital is the budget the bot manages itself: it never lets
-    # the summed cost basis of open positions exceed this.  Set to match
-    # the Alpaca paper account's default $100k starting balance so the
-    # bot budget and the account equity line up.
-    "total_capital": 100000.0,    # total budget in USD the bot deploys
-    # sizing_mode:
-    #   "confidence" → each BUY is sized between min_position_pct and
-    #                  max_position_pct of total_capital, scaled by how
-    #                  strongly the signals agree (vote conviction).
-    #   "fixed"      → legacy behaviour (order_qty / order_dollar_value).
-    "sizing_mode":       "confidence",
-    "min_position_pct":  0.05,    # 5 % of capital at the vote threshold
-    "max_position_pct":  0.20,    # 20 % of capital at full agreement
-
-    # Legacy fixed-sizing knobs (used only when sizing_mode == "fixed",
-    # and as the SELL fallback for positions with no recorded quantity).
-    # Priority: order_qty (per-ticker) > order_dollar_value > order_qty_default
-    "order_qty":          {"BTC": 0.001, "ETH": 0.01},
-    "order_qty_default":  1,      # fallback qty for stocks (shares)
-    "order_dollar_value": 500,    # target notional per trade in USD
-                                  # (0 = disable, use order_qty_default)
-    "stop_loss_pct":      0.02,   # 2 % drop from entry triggers exit
-    "max_open_positions": 10,     # hard cap on simultaneous positions
-
-    # ── Startup backfill ──────────────────────────────────────────────
-    # On launch, fetch this many days of 1-min bars from Alpaca into
-    # bars.db so the rolling windows preload fresh, continuous history
-    # and the strategy can trade soundly from the first live bar.
-    # 0 disables backfill (use only whatever is already in bars.db).
-    "backfill_days": 7,
-
-    # Vote aggregation
-    "vote_threshold":  2,
-    "active_signals": ["BB", "OU", "VWAP", "VolSpike", "KalmanZ"],
-
-    # Bollinger Band mean-reversion  (signal: "BB")
-    "bb_period": 200,
-    "bb_std":    2.5,
-
-    # EMA crossover  (signal: "EMA_Cross")
-    "ema_fast": 10,
-    "ema_slow": 200,
-
-    # MACD zero-cross  (signal: "MACD_Zero")
-    "macd_fast": 26,
-    "macd_slow": 78,
-
-    # Z-score mean-reversion  (signal: "Zscore")
-    "zscore_window":    200,
-    "zscore_threshold": 2.0,
-
-    # RSI extremes  (signal: "RSI")
-    "rsi_period": 200,
-    "rsi_buy":    25.0,
-    "rsi_sell":   75.0,
-
-    # Volume spike  (signal: "VolSpike")
-    "vol_window": 20,
-    "vol_factor": 2.0,
-
-    # Ornstein-Uhlenbeck  (signal: "OU")
-    "ou_window":    200,
-    "ou_threshold": 2.0,
-
-    # Kalman Z-score  (signal: "KalmanZ")
-    "kalman_q":         1e-4,  # Process noise  (higher → more adaptive)
-    "kalman_r":         0.1,   # Measurement noise
-    "kalman_roll_win":  100,   # Rolling window for residual std
-    "kalman_threshold": 2.0,
-
-    # VWAP deviation  (signal: "VWAP")
-    "vwap_threshold": 0.005,   # 0.5 % deviation from session VWAP
-
-    # Opening Range Breakout  (signal: "ORB")
-    "orb_bars": 6,             # First 6 bars define the opening range
-
-    # Time filter gate  (signal: "TimeFilter")
-    "session_length": 1440,    # Bars per session (1440 = 24 h at 1-min)
-    "time_skip":      6,       # Skip first and last N bars of session
-}
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  Config
-# ══════════════════════════════════════════════════════════════════════════════
-
-def load_config() -> dict | None:
-    """Read hyperparameters from ``config.json`` and merge with defaults.
-
-    Creates the file with defaults if absent.  Any key present in
-    ``DEFAULT_CONFIG`` but missing from the file is filled in from
-    defaults, ensuring forward compatibility when new parameters are
-    added.
-
-    Returns:
-        dict | None: Merged configuration, or ``None`` on a JSON parse
-            error (caller should retain the last valid config).
-    """
-    if not CONFIG_FILE.exists():
-        CONFIG_FILE.write_text(json.dumps(DEFAULT_CONFIG, indent=4))
-        log.info(f"📝 Created default config at {CONFIG_FILE}")
-        return DEFAULT_CONFIG.copy()
-    try:
-        return {**DEFAULT_CONFIG, **json.loads(CONFIG_FILE.read_text())}
-    except json.JSONDecodeError:
-        log.warning("⚠️  config.json parse error — keeping previous values")
-        return None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -615,12 +466,13 @@ class CryptoBot:
     """
 
     def __init__(self) -> None:
-        self.trading_client: TradingClient = TradingClient(
-            API_KEY, API_SECRET, paper=PAPER
-        )
+        self.trading_client = make_trading_client()
         # load_config() returns None on a JSON parse error; fall back to
         # defaults so the bot starts cleanly even with a malformed file.
-        self.cfg: dict = load_config() or DEFAULT_CONFIG.copy()
+        self.cfg: dict = (
+            load_config(create_if_missing=True, log=log)
+            or DEFAULT_CONFIG.copy()
+        )
 
         symbols: list[str] = self.cfg.get(
             "symbols", DEFAULT_CONFIG["symbols"]
@@ -630,8 +482,8 @@ class CryptoBot:
         }
 
         # Split symbols into their respective stream types
-        self._crypto_syms: list[str] = [s for s in symbols if _is_crypto(s)]
-        self._stock_syms:  list[str] = [s for s in symbols if not _is_crypto(s)]
+        self._crypto_syms: list[str] = [s for s in symbols if is_crypto(s)]
+        self._stock_syms:  list[str] = [s for s in symbols if not is_crypto(s)]
 
         # Both stream objects are always created — no connection is
         # opened until their runner starts — so that symbols of either
@@ -687,50 +539,19 @@ class CryptoBot:
         start = end - timedelta(days=days)
         log.info(f"⬇️  Backfill {days} j d'historique depuis Alpaca…")
 
-        crypto_client: CryptoHistoricalDataClient | None = None
-        stock_client:  StockHistoricalDataClient | None = None
+        crypto_client, stock_client = make_data_clients()
         total = 0
 
         for symbol in self.assets:
-            try:
-                if _is_crypto(symbol):
-                    if crypto_client is None:
-                        crypto_client = CryptoHistoricalDataClient(
-                            API_KEY, API_SECRET
-                        )
-                    bar_set = crypto_client.get_crypto_bars(
-                        CryptoBarsRequest(
-                            symbol_or_symbols = symbol,
-                            timeframe         = TimeFrame.Minute,
-                            start             = start,
-                            end               = end,
-                        )
-                    )
-                else:
-                    if stock_client is None:
-                        stock_client = StockHistoricalDataClient(
-                            API_KEY, API_SECRET
-                        )
-                    bar_set = stock_client.get_stock_bars(
-                        StockBarsRequest(
-                            symbol_or_symbols = symbol,
-                            timeframe         = TimeFrame.Minute,
-                            start             = start,
-                            end               = end,
-                            feed              = DataFeed.IEX,
-                        )
-                    )
-                bars = bar_set.data.get(symbol, [])
-            except Exception as exc:
-                log.warning(f"⚠️  {symbol}: backfill échoué — {exc}")
-                continue
-
+            bars = fetch_bars(
+                crypto_client, stock_client, symbol, start, end, log=log
+            )
             rows = [
                 (
                     symbol,
-                    b.timestamp.isoformat(),
-                    float(b.open), float(b.high), float(b.low),
-                    float(b.close), float(b.volume),
+                    b["timestamp"],
+                    b["open"], b["high"], b["low"],
+                    b["close"], b["volume"],
                 )
                 for b in bars
             ]
@@ -820,7 +641,7 @@ class CryptoBot:
         if now - self._last_config_reload < _CONFIG_RELOAD_INTERVAL:
             return None
         self._last_config_reload = now
-        new_cfg = load_config()
+        new_cfg = load_config(create_if_missing=True, log=log)
         if new_cfg is None:
             return None
         changed = [
@@ -887,7 +708,7 @@ class CryptoBot:
                     continue
                 asset.in_position = False
             stream = (
-                self.crypto_stream if _is_crypto(symbol)
+                self.crypto_stream if is_crypto(symbol)
                 else self.stock_stream
             )
             try:
@@ -904,7 +725,7 @@ class CryptoBot:
                 asset.preload(bars)
             self.assets[symbol] = asset
             stream = (
-                self.crypto_stream if _is_crypto(symbol)
+                self.crypto_stream if is_crypto(symbol)
                 else self.stock_stream
             )
             try:
@@ -919,8 +740,8 @@ class CryptoBot:
                 f"➕ {symbol}: abonné ({len(bars)} barres préchargées)"
             )
 
-        self._crypto_syms = [s for s in self.assets if _is_crypto(s)]
-        self._stock_syms  = [s for s in self.assets if not _is_crypto(s)]
+        self._crypto_syms = [s for s in self.assets if is_crypto(s)]
+        self._stock_syms  = [s for s in self.assets if not is_crypto(s)]
 
         # Start a stream that was idle until its first symbol arrived
         if self._crypto_syms and not self._crypto_ready.is_set():
@@ -985,7 +806,7 @@ class CryptoBot:
         dollar_val = float(self.cfg.get("order_dollar_value", 0))
         if dollar_val > 0 and close > 0:
             qty = dollar_val / close
-            return qty if _is_crypto(symbol) else max(1.0, round(qty))
+            return qty if is_crypto(symbol) else max(1.0, round(qty))
         return float(self.cfg.get("order_qty_default", 1))
 
     def _deployed_capital(self) -> float:
@@ -1056,7 +877,7 @@ class CryptoBot:
         # Whole units would break tiny budgets on pricey shares, so keep
         # fractional precision for stocks too (rounded to avoid API
         # rejections on over-precise quantities).
-        return qty if _is_crypto(symbol) else round(qty, 4)
+        return qty if is_crypto(symbol) else round(qty, 4)
 
     def _sell_qty(self, asset: AssetState, close: float) -> float:
         """Return the quantity to sell to fully close a position.
@@ -1110,7 +931,7 @@ class CryptoBot:
         """
         action = "BUY  🟢" if side == OrderSide.BUY else "SELL 🔴"
         tif = (
-            TimeInForce.GTC if _is_crypto(asset.symbol)
+            TimeInForce.GTC if is_crypto(asset.symbol)
             else TimeInForce.DAY
         )
         try:
@@ -1474,7 +1295,8 @@ class CryptoBot:
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 
-if __name__ == "__main__":
+def main() -> None:
+    """Instantiate the bot and run it until interrupted."""
     bot = CryptoBot()
     try:
         bot.run()
@@ -1483,3 +1305,7 @@ if __name__ == "__main__":
     finally:
         bot.close()
         log.info("💾 Shutdown complete.")
+
+
+if __name__ == "__main__":
+    main()

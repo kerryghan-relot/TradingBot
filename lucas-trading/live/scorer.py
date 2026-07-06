@@ -1,25 +1,25 @@
 """
-Weekly TopX symbol scorer — lucas-live-trading
+Weekly TopX symbol scorer — lucas-trading/live
 ===============================================
 Fetches recent 1-minute bars for every candidate symbol, simulates
 the same vote-based strategy used by ``bot.py``, ranks symbols by
-annualised Sharpe ratio, and updates ``config.json["symbols"]`` with
-the top-X winners.
+annualised Sharpe ratio, and updates ``config/config.json["symbols"]``
+with the top-X winners.
 
-Run this script once a week (see ``run_scorer.ps1`` for a Windows
-scheduled-task wrapper).  The bot hot-reloads the new symbol list
-within ~30 s: added symbols are subscribed live, removed symbols are
-liquidated — no restart needed.
+Run this script once a week (see ``deploy/scripts/run_scorer.ps1``
+for a Windows scheduled-task wrapper).  The bot hot-reloads the new
+symbol list within ~30 s: added symbols are subscribed live, removed
+symbols are liquidated — no restart needed.
 
-Usage:
+Usage (from ``lucas-trading/``):
     # Preview results without modifying config.json
-    python scorer.py --dry-run
+    python -m live.scorer --dry-run
 
     # Apply top-5 (default) to config.json
-    python scorer.py
+    python -m live.scorer
 
     # Override top-X and lookback at runtime
-    python scorer.py --top 3 --days 14
+    python -m live.scorer --top 3 --days 14
 
 Requirements:
     pip install alpaca-py python-dotenv
@@ -30,113 +30,27 @@ Environment variables (.env):
 """
 
 import argparse
-import json
 import logging
-import os
 from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
-from dotenv import load_dotenv
-
-from alpaca.data.enums import DataFeed
 from alpaca.data.historical.crypto import CryptoHistoricalDataClient
 from alpaca.data.historical.stock import StockHistoricalDataClient
-from alpaca.data.requests import CryptoBarsRequest, StockBarsRequest
-from alpaca.data.timeframe import TimeFrame
 
-from constants import SYMBOLS, BARS_PER_YEAR_CRYPTO, BARS_PER_YEAR_STOCK
-from engine import SignalState, evaluate_bar
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _is_crypto(symbol: str) -> bool:
-    """Return True for crypto pairs (e.g. ``"BTC/USD"``), False for stocks."""
-    return "/" in symbol
+from core.broker import fetch_bars, is_crypto, make_data_clients
+from core.config import DEFAULT_CONFIG, SCORER_DEFAULTS, write_symbols
+from core.config import load_config as _load_config
+from core.constants import (
+    BARS_PER_YEAR_CRYPTO,
+    BARS_PER_YEAR_STOCK,
+    ROOT_DIR,
+)
+from core.engine import SignalState, evaluate_bar
 
 
 # ── Static config ─────────────────────────────────────────────────────────────
 
-load_dotenv()
-
-API_KEY:    str | None = os.getenv("ALPACA_API_KEY")
-API_SECRET: str | None = os.getenv("ALPACA_SECRET_KEY")
-if not API_KEY or not API_SECRET:
-    raise RuntimeError(
-        "Missing ALPACA_API_KEY or ALPACA_SECRET_KEY in .env"
-    )
-
-CONFIG_FILE: Path = Path(__file__).parent / "config.json"
-LOG_FILE:    Path = Path(__file__).parent / "scorer.log"
-
-# BARS_PER_YEAR_CRYPTO / BARS_PER_YEAR_STOCK imported from constants.py.
-# Using the wrong constant inflates Sharpe by ×2.3 for US stocks.
-
-# Core bot defaults — mirrors bot.py's DEFAULT_CONFIG so scorer.py
-# can be run without importing the live-bot module (which checks .env
-# at import time and creates Alpaca clients).
-_BOT_DEFAULTS: dict = {
-    "symbols": list(SYMBOLS),   # own copy — never mutate SYMBOLS constant
-    # Capital & sizing — mirrors bot.py DEFAULT_CONFIG.  The scorer
-    # ranks by per-bar return (size-independent), so these do not affect
-    # the ranking; they are kept here only so the merged config round-
-    # trips every key the bot expects.
-    "total_capital":      100000.0,
-    "sizing_mode":        "confidence",
-    "min_position_pct":   0.05,
-    "max_position_pct":   0.20,
-    "order_qty":          {"BTC": 0.001, "ETH": 0.01},
-    "order_qty_default":  1,
-    "order_dollar_value": 500,  # kept in sync with bot.py DEFAULT_CONFIG
-    "stop_loss_pct":      0.02,
-    "max_open_positions": 10,   # kept in sync with bot.py DEFAULT_CONFIG
-    "backfill_days":      7,    # kept in sync with bot.py DEFAULT_CONFIG
-    "vote_threshold":     2,
-    "active_signals":    ["BB", "OU", "VWAP", "VolSpike", "KalmanZ"],
-    "bb_period":         200,
-    "bb_std":            2.5,
-    "ema_fast":          10,
-    "ema_slow":          200,
-    "macd_fast":         26,
-    "macd_slow":         78,
-    "zscore_window":     200,
-    "zscore_threshold":  2.0,
-    "rsi_period":        200,
-    "rsi_buy":           25.0,
-    "rsi_sell":          75.0,
-    "vol_window":        20,
-    "vol_factor":        2.0,
-    "ou_window":         200,
-    "ou_threshold":      2.0,
-    "kalman_q":          1e-4,
-    "kalman_r":          0.1,
-    "kalman_roll_win":   100,
-    "kalman_threshold":  2.0,
-    "vwap_threshold":    0.005,
-    "orb_bars":          6,
-    "session_length":    1440,
-    "time_skip":         6,
-}
-
-# Scorer-specific defaults merged into the bot config on load
-SCORER_DEFAULTS: dict = {
-    # Candidate pool — single source of truth in constants.py
-    "scorer_candidates": SYMBOLS,
-    # Number of top symbols to trade
-    "scorer_top_x":         5,
-    # Historical lookback window in days
-    "scorer_lookback_days": 30,
-    # Minimum Sharpe to be eligible; symbols below this floor are excluded
-    # even if they rank in the top-X
-    "scorer_min_sharpe":    -99.0,
-    # Transaction costs, applied once per side (entry AND exit) in the
-    # simulation.  fee: broker/exchange commission (0.0005 = 0.05 %,
-    # matches lucas-research FEES).  slippage: half-spread + market
-    # impact estimate for market orders on 1-min bars.
-    "scorer_fee_pct":       0.0005,
-    "scorer_slippage_pct":  0.0005,
-}
-
+LOG_FILE: Path = ROOT_DIR / "scorer.log"
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -185,102 +99,8 @@ def load_config() -> dict:
         dict: Merged configuration dictionary.  Falls back to combined
             defaults if the file is absent or malformed.
     """
-    # Start from combined defaults
-    merged = {**_BOT_DEFAULTS, **SCORER_DEFAULTS}
-
-    if not CONFIG_FILE.exists():
-        return merged
-    try:
-        on_disk = json.loads(CONFIG_FILE.read_text())
-        return {**merged, **on_disk}
-    except json.JSONDecodeError:
-        log.warning("⚠️  config.json parse error — using defaults")
-        return merged
-
-
-def _write_symbols(new_symbols: list[str]) -> None:
-    """Update only the ``symbols`` key in ``config.json`` in-place.
-
-    Reads the existing file, replaces ``symbols``, and writes back.
-    All other keys are preserved unchanged.
-
-    Args:
-        new_symbols (list[str]): New symbol list, e.g.
-            ``["BTC/USD", "ETH/USD", "SOL/USD"]``.
-    """
-    try:
-        cfg = json.loads(CONFIG_FILE.read_text())
-    except (json.JSONDecodeError, FileNotFoundError):
-        cfg = {}
-    cfg["symbols"] = new_symbols
-    CONFIG_FILE.write_text(json.dumps(cfg, indent=4))
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  Alpaca data fetching
-# ══════════════════════════════════════════════════════════════════════════════
-
-def fetch_bars(
-    crypto_client: CryptoHistoricalDataClient,
-    stock_client:  StockHistoricalDataClient,
-    symbol: str,
-    start:  datetime,
-    end:    datetime,
-) -> list[dict]:
-    """Fetch 1-minute OHLCVT bars from Alpaca for one symbol.
-
-    Routes to the correct Alpaca client based on the symbol type:
-    crypto pairs (containing ``"/"``) use ``CryptoHistoricalDataClient``;
-    stock tickers use ``StockHistoricalDataClient``.
-
-    Args:
-        crypto_client (CryptoHistoricalDataClient): Alpaca crypto client.
-        stock_client  (StockHistoricalDataClient) : Alpaca stock client.
-        symbol (str): Asset symbol, e.g. ``"BTC/USD"`` or ``"AAPL"``.
-        start  (datetime): Inclusive start of the lookback window (UTC).
-        end    (datetime): Exclusive end of the lookback window (UTC).
-
-    Returns:
-        list[dict]: Chronologically ordered bar dicts.  Empty on error.
-    """
-    try:
-        if _is_crypto(symbol):
-            bar_set = crypto_client.get_crypto_bars(
-                CryptoBarsRequest(
-                    symbol_or_symbols = symbol,
-                    timeframe         = TimeFrame.Minute,
-                    start             = start,
-                    end               = end,
-                )
-            )
-        else:
-            bar_set = stock_client.get_stock_bars(
-                StockBarsRequest(
-                    symbol_or_symbols = symbol,
-                    timeframe         = TimeFrame.Minute,
-                    start             = start,
-                    end               = end,
-                    feed              = DataFeed.IEX,
-                )
-            )
-        raw = bar_set.data.get(symbol, [])
-    except Exception as exc:
-        log.error(f"  ❌ {symbol}: fetch failed — {exc}")
-        return []
-
-    bars = [
-        {
-            "timestamp": b.timestamp.isoformat(),
-            "open":      float(b.open),
-            "high":      float(b.high),
-            "low":       float(b.low),
-            "close":     float(b.close),
-            "volume":    float(b.volume),
-        }
-        for b in raw
-    ]
-    log.debug(f"  {symbol}: fetched {len(bars)} bars")
-    return bars
+    defaults = {**DEFAULT_CONFIG, **SCORER_DEFAULTS}
+    return _load_config(defaults=defaults, log=log) or defaults
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -504,12 +324,14 @@ def score_all(
     results: list[dict] = []
 
     for symbol in candidates:
-        kind = "crypto" if _is_crypto(symbol) else "stock"
+        kind = "crypto" if is_crypto(symbol) else "stock"
         log.info(
             f"  📊 {symbol} [{kind}]: "
             f"fetching {lookback_days}-day history…"
         )
-        bars = fetch_bars(crypto_client, stock_client, symbol, start, end)
+        bars = fetch_bars(
+            crypto_client, stock_client, symbol, start, end, log=log
+        )
         if not bars:
             log.warning(f"  ⚠️  {symbol}: no data — skipped")
             continue
@@ -518,7 +340,7 @@ def score_all(
         rets = simulate(bars, cfg)
 
         # Use the correct annualisation factor per asset class
-        bpy = BARS_PER_YEAR_CRYPTO if _is_crypto(symbol) else BARS_PER_YEAR_STOCK
+        bpy = BARS_PER_YEAR_CRYPTO if is_crypto(symbol) else BARS_PER_YEAR_STOCK
         s   = sharpe(rets, bpy)
         tr  = total_return(rets)
         mdd = max_drawdown(rets)
@@ -613,8 +435,7 @@ def main() -> None:
         f"   Dry-run    : {args.dry_run}\n"
     )
 
-    crypto_client = CryptoHistoricalDataClient(API_KEY, API_SECRET)
-    stock_client  = StockHistoricalDataClient(API_KEY, API_SECRET)
+    crypto_client, stock_client = make_data_clients()
 
     results = score_all(crypto_client, stock_client, cfg, lookback)
 
@@ -643,7 +464,7 @@ def main() -> None:
     if args.dry_run:
         log.info("🔒 Dry-run mode — config.json not modified.")
     else:
-        _write_symbols(selected)
+        write_symbols(selected)
         log.info(
             f"✅ config.json updated with symbols: {selected}\n"
             f"   Le bot applique la nouvelle liste à chaud (~30 s) : "

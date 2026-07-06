@@ -1,5 +1,5 @@
 """
-Dashboard de monitoring — lucas-live-trading
+Dashboard de monitoring — lucas-trading/live
 ============================================
 Visualise en temps quasi-réel :
   - Portefeuille Alpaca (positions, P&L, solde)
@@ -8,8 +8,8 @@ Visualise en temps quasi-réel :
   - Historique des ordres BUY/SELL
   - Configuration active (lecture + édition)
 
-Lancement :
-    streamlit run lucas-live-trading/dashboard.py
+Lancement (depuis lucas-trading/) :
+    streamlit run live/dashboard.py
 
 Nécessite le même .env que bot.py (ALPACA_API_KEY / ALPACA_SECRET_KEY).
 """
@@ -31,9 +31,12 @@ from plotly.subplots import make_subplots
 
 load_dotenv()
 
-LIVE_DIR:    Path       = Path(__file__).parent
-DB_FILE:     Path       = LIVE_DIR / "bars.db"
-CONFIG_FILE: Path       = LIVE_DIR / "config.json"
+# Paths resolved relative to this file so the dashboard works no
+# matter where streamlit is launched from (kept self-contained: no
+# core import — streamlit runs this file with its own sys.path).
+TRADING_DIR: Path       = Path(__file__).resolve().parent.parent
+DB_FILE:     Path       = TRADING_DIR / "bars.db"
+CONFIG_FILE: Path       = TRADING_DIR / "config" / "config.json"
 API_KEY:     str | None = os.getenv("ALPACA_API_KEY")
 API_SECRET:  str | None = os.getenv("ALPACA_SECRET_KEY")
 PAPER:       bool       = True
