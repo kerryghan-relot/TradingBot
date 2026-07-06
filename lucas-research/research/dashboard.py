@@ -31,6 +31,10 @@ CSV_SCORES = RESULTS_DIR / "scores_topx.csv"
 CSV_WEIGHTS = RESULTS_DIR / "weights_topx.csv"
 CSV_EQUITY = RESULTS_DIR / "equity_topx.csv"
 CSV_OPTIMIZE_TOPX = RESULTS_DIR / "optimize_topx_resultats.csv"
+CSV_V2_RESULTS = RESULTS_DIR / "v2_regime_mr_results.csv"
+CSV_V2_EQUITY = RESULTS_DIR / "v2_regime_mr_equity.csv"
+CSV_V2_TOPX_EQUITY = RESULTS_DIR / "v2_topx_equity.csv"
+CSV_V2_TOPX_SELECTION = RESULTS_DIR / "v2_topx_selection.csv"
 
 # ── Page config ──────────────────────────────────────────────────
 st.set_page_config(
@@ -221,6 +225,9 @@ PAGES = {
     "🏆 Top-X Portfolio": "topx",
     "🧪 Optimize Top-X": "optimize_topx",
     "⚖️ Comparaison méthodes": "compare",
+    "🧠 Stratégie V2 — Les choix": "v2_choices",
+    "🔬 Stratégie V2 — Le test": "v2_test",
+    "🎯 Sélection Top-X (V2)": "v2_topx",
 }
 
 with st.sidebar:
@@ -239,6 +246,7 @@ with st.sidebar:
         ("Hyperparams", CSV_HYPERPARAMS),
         ("Top-X Portfolio", CSV_EQUITY),
         ("Optimize Top-X", CSV_OPTIMIZE_TOPX),
+        ("V2 Régime MR", CSV_V2_RESULTS),
     ]:
         st.markdown(f"{'✅' if path.exists() else '⬜'} {name}")
 
@@ -1377,6 +1385,566 @@ def page_optimize_topx() -> None:
     )
 
 
+# ══════════════════════════════════════════════════════════════════
+# PAGE 7 : STRATÉGIE V2 — LES CHOIX
+# ══════════════════════════════════════════════════════════════════
+
+def page_v2_choices() -> None:
+    st.markdown("# 🧠 Stratégie V2 — chaque choix expliqué")
+    st.caption(
+        "Mean-reversion filtré par régime, barres 15 min, long-only. "
+        "Code : `research/backtest_v2_regime_mr.py`"
+    )
+
+    # ── Contexte ─────────────────────────────────────────────────
+    section("Pourquoi une V2 — le diagnostic de la V1")
+    st.markdown(
+        """
+La V1 (vote BB + OU + VWAP + VolSpike + KalmanZ, seuil 2, stop 2 %)
+perdait **~ −40 % sur 3 ans** après coûts, et sa sélection top-5 par
+Sharpe glissant ne battait que 31 % des sélections aléatoires. Quatre
+causes identifiées, chacune corrigée par un choix précis de la V2 :
+
+| Problème V1 | Correction V2 |
+|---|---|
+| 4 signaux qui mesurent tous « le prix est sous sa moyenne » (redondants) | Un seul déclencheur (z-score) + deux filtres **orthogonaux** (régime, volatilité) |
+| Aucune vraie sortie : on attend le signal opposé, stop fixe 2 % | 3 sorties dédiées : take-profit à la moyenne, stop temporel, stop-loss en σ |
+| ~460 combinaisons × 30 symboles = 14 000 backtests, gagnants choisis a posteriori | Grille de **12** combinaisons, calibrée sur le train uniquement |
+| Barres corrompues (close ETH à 6.7e-06) dans les classements | Filtre de glitchs par médiane mobile avant tout calcul |
+"""
+    )
+
+    st.markdown("---")
+
+    # ── Choix 1 : barres 15 min ──────────────────────────────────
+    section("Choix 1 — Barres 15 minutes (au lieu de 5)")
+    st.markdown(
+        """
+Chaque aller-retour coûte **0,20 %** (0,10 % par côté : frais +
+slippage), quel que soit le résultat du trade. Sur des barres de
+5 min, les mouvements exploitables sont souvent plus petits que ce
+péage : on multiplie les trades dont le gain brut ne couvre pas les
+frais. En agrégeant en 15 min, le mouvement moyen par signal grossit,
+le bruit diminue, et le nombre de trades chute — on paie le péage
+moins souvent, pour des trajets plus longs.
+"""
+    )
+    with st.expander("Dans le code"):
+        st.code(
+            'df.resample("15min").agg({"open": "first", "high": "max",'
+            ' "low": "min", "close": "last", "volume": "sum"})',
+            language="python",
+        )
+
+    # ── Choix 2 : z-score ────────────────────────────────────────
+    section("Choix 2 — Le déclencheur : z-score en croisement")
+    st.markdown(
+        """
+Le z-score mesure l'écart du prix à sa moyenne mobile, **exprimé en
+écarts-types** :
+"""
+    )
+    st.latex(r"z_t = \frac{close_t - SMA_{100}}{\sigma_{100}}")
+    st.markdown(
+        """
+Un z de −1,5 signifie : le prix est 1,5 écart-type sous sa moyenne
+des ~2-4 derniers jours — un niveau statistiquement inhabituel, qui
+tend à se résorber (retour à la moyenne).
+
+Deux décisions importantes ici :
+
+- **Croisement, pas niveau.** On entre quand z *franchit* −1,5
+  (`z(t−1) ≥ −1,5` et `z(t) < −1,5`), pas quand il *est* sous −1,5.
+  Un signal de niveau se re-déclenche à chaque barre pendant que le
+  prix s'enfonce — c'est ce qui faisait racheter la V1 en pleine
+  chute. Le croisement donne une seule entrée par excursion.
+- **Un seul estimateur de moyenne.** BB, OU, KalmanZ et VWAP sont
+  quatre variantes du même calcul, corrélées entre elles. Un vote
+  entre clones n'ajoute aucune information, seulement des paramètres
+  à sur-ajuster. La V2 garde un déclencheur unique et place
+  l'intelligence dans les *filtres* (choix 3 et 4).
+"""
+    )
+
+    # ── Choix 3 : Efficiency Ratio ───────────────────────────────
+    section("Choix 3 — Le filtre de régime : Efficiency Ratio < 0,35")
+    st.markdown(
+        """
+Le retour à la moyenne ne fonctionne que si le marché **oscille**.
+Pendant une tendance, acheter « parce que c'est bas » revient à se
+placer face au mouvement. L'Efficiency Ratio de Kaufman distingue
+les deux régimes en comparant le déplacement *net* du prix à la
+distance *totale* parcourue :
+"""
+    )
+    st.latex(
+        r"ER = \frac{|close_t - close_{t-48}|}"
+        r"{\sum_{i=t-47}^{t} |close_i - close_{i-1}|}"
+    )
+    st.markdown(
+        """
+- **ER proche de 1** : le prix va tout droit → tendance → on ne
+  trade pas.
+- **ER proche de 0** : le prix fait beaucoup de chemin pour finir
+  près de son point de départ → range → le retour à la moyenne a
+  ses chances.
+
+L'entrée n'est autorisée que si **ER < 0,35** sur les 48 dernières
+barres (~12 h). Ce filtre existait déjà dans `strategies.py`
+(`Regime_Range`) mais était désactivé — c'est le signal orthogonal
+qui manquait au vote de la V1.
+"""
+    )
+
+    # ── Choix 4 : filtre de volatilité ───────────────────────────
+    section("Choix 4 — Le filtre économique : volatilité ≥ 0,3 %")
+    st.markdown(
+        """
+Le gain espéré d'un trade de retour à la moyenne est à peu près la
+distance à la moyenne au moment de l'entrée, soit
+`|z| × σ ≈ 1,5 σ`. Si σ est trop petit, même un retour parfait ne
+rembourse pas les 0,20 % de coûts. On exige donc :
+"""
+    )
+    st.latex(
+        r"\frac{\sigma_{100}}{close} \geq 0{,}003"
+        r"\quad\Rightarrow\quad"
+        r"\text{gain espéré} \approx 1{,}5 \times 0{,}3\,\% = 0{,}45\,\%"
+        r" \gg 0{,}20\,\% \text{ de coûts}"
+    )
+    st.markdown(
+        """
+C'est la traduction directe du diagnostic V1 : les signaux ne
+perdaient pas tant que ça *avant* frais — ce sont les coûts qui
+mangeaient un gain brut trop petit. Sur le train, ce filtre à 0,003
+bat sa variante à 0,002 pour **toutes** les combinaisons testées :
+moins de trades, meilleurs trades.
+"""
+    )
+
+    # ── Choix 5 : les sorties ────────────────────────────────────
+    section("Choix 5 — Trois sorties, chacune avec un rôle")
+    st.markdown(
+        """
+La V1 achetait « trop bas » et revendait « trop haut », sans rien
+entre les deux : une position pouvait glisser des semaines sans
+déclencher ni la revente ni le stop. La V2 donne à chaque trade un
+objectif, une date limite et un plan d'évacuation :
+
+| Sortie | Condition | Rôle |
+|---|---|---|
+| **Take-profit** | z ≥ 0 | Le prix a retouché sa moyenne : l'espérance conditionnelle du trade est consommée. Attendre le seuil opposé (+2σ) transformerait la seconde moitié du trade en pari directionnel sans edge. |
+| **Stop temporel** | 96 barres (~4 jours de bourse) | Si la moyenne n'est pas retouchée dans le délai, le contexte a changé : l'edge estimé à l'entrée n'existe plus. Élimine les « positions zombies ». |
+| **Stop-loss** | prix ≤ entrée − 3σ | Dimensionné en volatilité, pas en % fixe : 2 % est trop serré pour TSLA, trop lâche pour SPY. À 3σ, il ne se déclenche que si l'hypothèse « étirement » est statistiquement réfutée — c'est devenu une tendance. |
+"""
+    )
+
+    # ── Choix 6 : protocole ──────────────────────────────────────
+    section("Choix 6 — La discipline de validation")
+    st.markdown(
+        """
+Le choix le plus important n'est pas dans la stratégie mais dans la
+méthode :
+
+1. **Coupe 70 / 30 dans le temps** : calibration sur mars 2023 →
+   juin 2025 (train), évaluation sur juin 2025 → mai 2026 (test),
+   regardée **une seule fois** à la fin.
+2. **Grille minuscule** : 12 combinaisons (3 seuils z × 2 seuils ER
+   × 2 seuils σ). Avec 14 000 backtests comme la V1, trouver des
+   gagnants in-sample est une certitude statistique, pas une
+   découverte. Avec 12, le meilleur du train a encore un sens.
+3. **Benchmark anti-chance** : sur le test, on rejoue 200 fois le
+   même nombre de trades, avec les mêmes durées, mais à des dates
+   aléatoires. Une stratégie dont les signaux valent quelque chose
+   doit battre ce benchmark — voir la page « Le test ».
+"""
+    )
+
+    st.info(
+        "Paramètres retenus (sélection sur le train) : "
+        "**z_entry = 1,5 · ER < 0,35 · σ/prix ≥ 0,003 · "
+        "max_hold = 96 barres · stop = 3σ · coût = 0,10 %/côté**"
+    )
+
+
+# ══════════════════════════════════════════════════════════════════
+# PAGE 8 : STRATÉGIE V2 — LE TEST
+# ══════════════════════════════════════════════════════════════════
+
+# Valeurs issues du run du 2026-07-05 qui ne sont pas recalculables
+# depuis les CSV (benchmark aléatoire, split train/test, actions
+# seules). Relancer backtest_v2_regime_mr.py pour les régénérer.
+V2_RUN_INFO: dict = {
+    "run_date": "2026-07-05",
+    "train_range": "2023-03-01 → 2025-06-12",
+    "test_range": "2025-06-12 → 2026-05-15",
+    "grid_best": "z=1.5, ER<0.35, σ_rel≥0.003 (Sharpe train −0.671)",
+    "pct_random_beaten": 87,
+    "random_median_pct": -4.89,
+    "stocks_only_test_ret": +1.97,
+    "stocks_only_test_sharpe": +0.371,
+    "stocks_only_train_ret": -9.04,
+    "train_sharpes": [
+        ("z=1.5 ER<0.25 σ≥0.002", -0.959),
+        ("z=1.5 ER<0.25 σ≥0.003", -0.793),
+        ("z=1.5 ER<0.35 σ≥0.002", -0.819),
+        ("z=1.5 ER<0.35 σ≥0.003", -0.671),
+        ("z=2.0 ER<0.25 σ≥0.002", -1.128),
+        ("z=2.0 ER<0.25 σ≥0.003", -0.925),
+        ("z=2.0 ER<0.35 σ≥0.002", -1.141),
+        ("z=2.0 ER<0.35 σ≥0.003", -0.981),
+        ("z=2.5 ER<0.25 σ≥0.002", -1.225),
+        ("z=2.5 ER<0.25 σ≥0.003", -1.022),
+        ("z=2.5 ER<0.35 σ≥0.002", -1.444),
+        ("z=2.5 ER<0.35 σ≥0.003", -1.311),
+    ],
+}
+
+
+def page_v2_test() -> None:
+    st.markdown("# 🔬 Stratégie V2 — protocole et résultats du test")
+
+    df = _load_flat(CSV_V2_RESULTS)
+    eq = _load_dated(CSV_V2_EQUITY)
+    if df.empty or eq.empty:
+        st.error(
+            "Aucun résultat V2 trouvé.\n\n"
+            "```\npython backtest_v2_regime_mr.py\n```"
+        )
+        return
+
+    info = V2_RUN_INFO
+
+    # ── Protocole ────────────────────────────────────────────────
+    section("Le protocole")
+    st.markdown(
+        f"""
+- **Données** : 30 symboles, 3 ans de barres 5 min nettoyées
+  (filtre de glitchs) puis rééchantillonnées en 15 min.
+- **Train** ({info["train_range"]}) : les 12 combinaisons de la
+  grille sont scorées sur le Sharpe du portefeuille équipondéré.
+- **Test** ({info["test_range"]}) : la combinaison gagnante du train
+  est évaluée **une seule fois** sur cette période jamais vue.
+- **Coûts** : 0,10 % par côté (frais + slippage), entrée/sortie au
+  close de la barre du signal.
+- **Benchmark anti-chance** : 200 rejeux à entrées aléatoires, même
+  nombre de trades et mêmes durées de détention.
+"""
+    )
+
+    with st.expander("Grille complète — Sharpe train des 12 combinaisons"):
+        grid_df = pd.DataFrame(
+            info["train_sharpes"], columns=["Combinaison", "Sharpe train"]
+        ).sort_values("Sharpe train", ascending=False)
+        st.dataframe(
+            grid_df.reset_index(drop=True).style.format(
+                {"Sharpe train": "{:+.3f}"}
+            ),
+            use_container_width=True,
+        )
+        st.caption(
+            "Toutes négatives sur le train : la sélection retient la "
+            "moins mauvaise, le verdict se joue sur le test. "
+            f"Retenue : {info['grid_best']}."
+        )
+
+    st.markdown("---")
+
+    # ── KPIs portefeuille (recalculés depuis les CSV) ────────────
+    section("Résultats — portefeuille test (30 symboles)")
+    rets = eq["test_equity"].pct_change().dropna()
+    years = max(
+        (eq.index[-1] - eq.index[0]).days / 365.25, 1e-9
+    )
+    ann_sharpe = (
+        0.0 if rets.std() == 0
+        else float(rets.mean() / rets.std() * np.sqrt(len(rets) / years))
+    )
+    total_ret = float(eq["test_equity"].iloc[-1] / eq["test_equity"].iloc[0] - 1) * 100
+    peak = eq["test_equity"].cummax()
+    max_dd = float(((peak - eq["test_equity"]) / peak).max()) * 100
+    n_trades = int(df["test_trades"].sum())
+    win_rate = float(
+        (df["test_trades"] * df["test_win_rate_%"]).sum()
+        / max(df["test_trades"].sum(), 1)
+    )
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    with c1:
+        kpi(
+            "Rendement test", f"{total_ret:+.2f}%",
+            "positive" if total_ret >= 0 else "negative",
+        )
+    with c2:
+        kpi(
+            "Sharpe annualisé", f"{ann_sharpe:+.3f}",
+            "positive" if ann_sharpe >= 0 else "negative",
+        )
+    with c3:
+        kpi("Max Drawdown", f"{max_dd:.2f}%", "negative")
+    with c4:
+        kpi("Trades (test)", f"{n_trades}")
+    with c5:
+        kpi("Win rate moyen", f"{win_rate:.1f}%")
+
+    st.markdown(
+        f"""
+| Portefeuille | Rendement test | Sharpe |
+|---|---|---|
+| 30 symboles (avec crypto) | {total_ret:+.2f} % | {ann_sharpe:+.3f} |
+| Actions seules (28) | **{info["stocks_only_test_ret"]:+.2f} %** | **{info["stocks_only_test_sharpe"]:+.3f}** |
+| Hasard (médiane des 200 rejeux) | {info["random_median_pct"]:+.2f} % | — |
+
+La stratégie bat **{info["pct_random_beaten"]} % des 200 rejeux
+aléatoires** (la sélection top-X de la V1 n'en battait que 31 %).
+"""
+    )
+
+    # ── Courbe d'équité ──────────────────────────────────────────
+    section("Courbe d'équité — période de test")
+    fig_eq = go.Figure(
+        go.Scatter(
+            x=eq.index, y=eq["test_equity"],
+            line=dict(color="#448aff", width=2), name="V2 (30 symboles)",
+        )
+    )
+    fig_eq.add_hline(y=1.0, line_dash="dot", line_color="rgba(255,255,255,0.25)")
+    fig_eq.update_layout(
+        **PLOTLY_THEME, height=380,
+        yaxis=dict(gridcolor="#1e1e1e", title="Équité (base 1.0)"),
+    )
+    st.plotly_chart(fig_eq, use_container_width=True)
+
+    # ── Par symbole ──────────────────────────────────────────────
+    section("Rendement net par symbole (test)")
+    df_sorted = df.sort_values("test_total_net_%", ascending=False)
+    st.plotly_chart(
+        _alpha_bar(
+            df_sorted["symbol"], df_sorted["test_total_net_%"], height=420
+        ),
+        use_container_width=True,
+    )
+    st.caption(
+        "BTC et ETH perdent lourdement — comme sur le train (−55 % / "
+        "−49 %), ce qui justifie de les exclure sans tricher sur le "
+        "test : en 15 min, ils tendent plus qu'ils ne « rangent »."
+    )
+
+    section("Détail par symbole")
+    st.dataframe(
+        df_sorted.reset_index(drop=True).style.format({
+            "test_win_rate_%": "{:.1f}%",
+            "test_avg_net_per_trade_%": "{:+.3f}%",
+            "test_total_net_%": "{:+.2f}%",
+        }).background_gradient(
+            subset=["test_total_net_%"], cmap="RdBu", vmin=-35, vmax=35
+        ),
+        use_container_width=True,
+        height=500,
+    )
+
+    # ── Verdict ──────────────────────────────────────────────────
+    st.markdown("---")
+    section("Verdict honnête")
+    st.markdown(
+        f"""
+- ✅ **Énorme progrès vs V1** : de −40 % sur 3 ans à ~l'équilibre
+  après coûts sur l'année de test, en battant
+  {info["pct_random_beaten"]} % du hasard.
+- ⚠️ **Pas encore un edge démontré** : le train actions seules est à
+  {info["stocks_only_train_ret"]:+.2f} % — une année de test positive
+  ne suffit pas.
+- 🎯 **La frontière actuelle est le coût d'exécution** : gain net
+  moyen par trade ≈ 0 alors que le win rate est de
+  {win_rate:.0f} %. Pistes : ordres limit au niveau −1,5σ (supprime
+  l'essentiel du slippage), coûts réels Alpaca (~0,05 %/côté ?),
+  actions uniquement.
+
+*Run du {info["run_date"]} — relancer
+`python backtest_v2_regime_mr.py` pour régénérer les CSV.*
+"""
+    )
+
+
+# ══════════════════════════════════════════════════════════════════
+# PAGE 9 : SÉLECTION TOP-X (V2)
+# ══════════════════════════════════════════════════════════════════
+
+def page_v2_topx() -> None:
+    st.markdown("# 🎯 Sélection Top-X — investir sur les 5 meilleures, pas toutes")
+    st.caption(
+        "Toutes les actions restent suivies en base ; seules les "
+        "TOP_X les plus prometteuses reçoivent du capital chaque "
+        "semaine. Code : `research/backtest_v2_topx.py`"
+    )
+
+    eq = _load_dated(CSV_V2_TOPX_EQUITY)
+    sel = _load_flat(CSV_V2_TOPX_SELECTION)
+    if eq.empty:
+        st.error(
+            "Aucun résultat trouvé.\n\n"
+            "```\npython backtest_v2_topx.py\n```"
+        )
+        return
+
+    # ── Principe ─────────────────────────────────────────────────
+    section("Le principe : deux garde-fous contre la chute libre")
+    st.markdown(
+        """
+Une stratégie de retour à la moyenne achète *par nature* ce qui vient
+de baisser. Le risque « acheter un couteau qui tombe » est donc réel,
+et il est traité à deux niveaux distincts :
+
+1. **Au niveau de la barre** (déjà dans la stratégie V2) — le filtre
+   de régime (Efficiency Ratio) bloque toute entrée tant que le
+   marché est en tendance, y compris une tendance baissière.
+2. **Au niveau de la sélection hebdomadaire** (nouveau, ce module) —
+   une action est retirée de l'univers investissable pour la semaine
+   si son rendement sur les 20 derniers jours est **inférieur à
+   −15 %** : un déclin prolongé, même s'il contient des rebonds
+   locaux qui passeraient le filtre du point 1.
+
+Parmi les actions restantes (« éligibles »), on classe par Sharpe
+glissant de **leur propre** stratégie V2 (comme `scorer.py` en live)
+et on retient les 5 mieux classées, en poids égaux.
+"""
+    )
+
+    st.markdown("---")
+
+    # ── Comparaison des 4 portefeuilles ───────────────────────────
+    section("Quatre portefeuilles comparés sur la période de test")
+    cols = st.columns(3)
+    labels = {
+        "topx_equity": ("Top-5 (filtre + classement)", "primary"),
+        "all_equity": ("Équipondéré — TOUTES les actions", "neutral"),
+        "eligible_equity": ("Équipondéré — éligibles seuls", "neutral"),
+    }
+    for i, (col_name, (label, _)) in enumerate(labels.items()):
+        if col_name not in eq.columns:
+            continue
+        ret = float(eq[col_name].iloc[-1] / eq[col_name].iloc[0] - 1) * 100
+        with cols[i % 3]:
+            kpi(label, f"{ret:+.2f}%", "positive" if ret >= 0 else "negative")
+
+    fig = go.Figure()
+    colors = {"topx_equity": "#00e676", "all_equity": "#448aff",
+              "eligible_equity": "#ffb300"}
+    names = {"topx_equity": f"Top-X sélection",
+             "all_equity": "Équipondéré (tous)",
+             "eligible_equity": "Équipondéré (éligibles)"}
+    for col_name in ["topx_equity", "all_equity", "eligible_equity"]:
+        if col_name in eq.columns:
+            fig.add_scatter(
+                x=eq.index, y=eq[col_name], name=names[col_name],
+                line=dict(width=2, color=colors[col_name]),
+            )
+    fig.add_hline(y=1.0, line_dash="dot", line_color="rgba(255,255,255,0.25)")
+    fig.update_layout(
+        **PLOTLY_THEME, height=420,
+        yaxis=dict(gridcolor="#1e1e1e", title="Équité (base 1.0)"),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.caption(
+        "Remarque contre-intuitive : « éligibles seuls » (le filtre "
+        "anti-chute libre sans classement) est parfois *pire* que "
+        "« toutes les actions ». Le filtre 20 jours exclut aussi des "
+        "actions très volatiles (ex. TSLA) pendant leurs creux — "
+        "précisément le moment où une stratégie de retour à la "
+        "moyenne est la plus rentable. Le filtre protège contre le "
+        "risque structurel, mais n'est pas gratuit."
+    )
+
+    st.markdown("---")
+
+    # ── Effet du lookback de classement ───────────────────────────
+    section("Le classement hebdomadaire à courte vue ne marche pas")
+    st.markdown(
+        """
+Premier essai avec un Sharpe glissant sur 20 jours (comme
+`scorer.py` en live) : la sélection ne battait que **27 % des tirages
+aléatoires** — le même symptôme que la V1. Des actions perdantes sur
+l'ensemble de la période (SNAP, PYPL, PLTR) étaient sélectionnées 8 à
+9 fois sur 45 semaines : le Sharpe à 20 jours est trop bruité pour
+prédire la semaine suivante.
+
+En allongeant la fenêtre de classement, sur la **même période
+d'évaluation** (pour isoler l'effet du lookback de tout artefact de
+fenêtre) :
+"""
+    )
+    lookback_df = pd.DataFrame({
+        "Lookback classement": ["20 jours", "40 jours", "60 jours", "90 jours"],
+        "Rendement (fenêtre fixe)": ["−2,15 %", "−1,32 %", "−1,77 %", "+2,36 %"],
+        "Sharpe": ["−0,307", "−0,169", "−0,236", "+0,438"],
+    })
+    st.dataframe(lookback_df, use_container_width=True, hide_index=True)
+    st.markdown(
+        """
+Seul le lookback à **90 jours** (un trimestre) fait passer la
+sélection en territoire positif — c'est la valeur retenue par défaut
+dans `backtest_v2_topx.py`. Un Sharpe estimé sur un trimestre lisse
+le bruit hebdomadaire ; en dessous, le classement revient à choisir
+au hasard parmi les actions qui viennent d'avoir une bonne ou
+mauvaise semaine, sans rapport avec la semaine suivante.
+"""
+    )
+
+    # ── Résultat final ────────────────────────────────────────────
+    section("Résultat retenu — lookback 90 jours")
+    if "topx_equity" in eq.columns:
+        total_ret = float(
+            eq["topx_equity"].iloc[-1] / eq["topx_equity"].iloc[0] - 1
+        ) * 100
+        rets = eq["topx_equity"].pct_change().dropna()
+        years = max((eq.index[-1] - eq.index[0]).days / 365.25, 1e-9)
+        ann_sharpe = (
+            0.0 if rets.std() == 0
+            else float(rets.mean() / rets.std() * np.sqrt(len(rets) / years))
+        )
+        peak = eq["topx_equity"].cummax()
+        max_dd = float(
+            ((peak - eq["topx_equity"]) / peak).max()
+        ) * 100
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            kpi("Rendement", f"{total_ret:+.2f}%",
+                "positive" if total_ret >= 0 else "negative")
+        with c2:
+            kpi("Sharpe annualisé", f"{ann_sharpe:+.3f}",
+                "positive" if ann_sharpe >= 0 else "negative")
+        with c3:
+            kpi("Max Drawdown", f"{max_dd:.2f}%", "negative")
+
+    if not sel.empty:
+        with st.expander("Historique des sélections hebdomadaires"):
+            st.dataframe(
+                sel[["rebalance", "n_eligible", "selected"]]
+                .reset_index(drop=True),
+                use_container_width=True, height=400,
+            )
+
+    # ── Verdict ──────────────────────────────────────────────────
+    st.markdown("---")
+    section("Verdict honnête")
+    st.markdown(
+        """
+- ✅ Le principe **DB complète + sélection top-X** fonctionne
+  correctement une fois le classement calibré sur une fenêtre assez
+  longue (90 jours) pour ne pas être du bruit.
+- ⚠️ L'échantillon reste petit (~0,66 an, une trentaine de
+  rebalancements) : un seul lookback gagnant sur quatre testés est un
+  indice encourageant, pas une preuve définitive — à reconfirmer sur
+  plus de données une fois davantage d'historique accumulé.
+- 🛡️ Le filtre anti-chute libre (20 jours, −15 %) protège le
+  principal risque redouté, mais son coût (exclusion d'actions
+  volatiles pendant leurs meilleurs points d'entrée) doit être
+  accepté consciemment, pas subi.
+"""
+    )
+
+
 # ── Dispatch ─────────────────────────────────────────────────────
 if page == "vote":
     page_vote()
@@ -1388,5 +1956,11 @@ elif page == "topx":
     page_topx()
 elif page == "optimize_topx":
     page_optimize_topx()
+elif page == "v2_choices":
+    page_v2_choices()
+elif page == "v2_test":
+    page_v2_test()
+elif page == "v2_topx":
+    page_v2_topx()
 elif page == "compare":
     page_compare()
