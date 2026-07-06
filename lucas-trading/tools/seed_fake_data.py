@@ -4,10 +4,10 @@ Générateur de données fictives pour tester le dashboard.
 Insère des barres OHLCV + indicateurs réalistes dans bars.db
 pour tous les 30 symboles, sans avoir besoin que le bot tourne.
 
-Usage :
-    python seed_fake_data.py           # 500 barres par symbole
-    python seed_fake_data.py --bars 1000
-    python seed_fake_data.py --reset   # efface d'abord les données existantes
+Usage (depuis lucas-trading/) :
+    python -m tools.seed_fake_data           # 500 barres par symbole
+    python -m tools.seed_fake_data --bars 1000
+    python -m tools.seed_fake_data --reset   # efface les données existantes
 """
 
 import argparse
@@ -15,11 +15,10 @@ import math
 import random
 import sqlite3
 from datetime import datetime, timedelta, UTC
-from pathlib import Path
+
+from core.constants import CRYPTO_SYMBOLS, DB_FILE
 
 # ── Config ────────────────────────────────────────────────────────────────────
-
-DB_FILE = Path(__file__).parent / "bars.db"
 
 random.seed(42)  # reproductible
 
@@ -74,7 +73,7 @@ VOLATILITY: dict[str, float] = {
 }
 DEFAULT_VOL = 0.0014
 
-CRYPTO: set[str] = {"BTC/USD", "ETH/USD"}
+CRYPTO: set[str] = CRYPTO_SYMBOLS
 
 # Vendredi 2026-05-22 — dernier jour de marché avant le week-end
 FRIDAY_CLOSE = datetime(2026, 5, 22, 20, 0, 0, tzinfo=UTC)   # 16h00 ET

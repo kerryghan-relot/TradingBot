@@ -3,11 +3,17 @@ Fetch 3 years of 5-min OHLCV data from the Twelve Data API.
 ============================================================
 
 Strategy: download in chunks of ~5 000 bars, resume if interrupted,
-then concatenate into a single sorted CSV.
+then concatenate into a single sorted CSV in ``data/``.
 
 Requires the environment variable TWELVE_DATA_API_KEY.
+
+Usage (from ``lucas-trading/``)::
+
+    python -m tools.download_history                # all 30 symbols
+    python -m tools.download_history AAPL BTC/USD   # a subset
 """
 
+import argparse
 import csv
 import logging
 import os
@@ -17,6 +23,8 @@ from pathlib import Path
 
 import pandas as pd
 import requests
+
+from core.constants import DATA_DIR, SYMBOLS
 
 logging.basicConfig(
     level=logging.INFO,
@@ -59,7 +67,7 @@ def fetch_history(symbol: str) -> None:
     Raises:
         RuntimeError: On API error responses.
     """
-    data_dir = Path(__file__).resolve().parent.parent / "data"
+    data_dir = DATA_DIR
     data_dir.mkdir(parents=True, exist_ok=True)
 
     safe_symbol = symbol_to_filename(symbol)
@@ -172,5 +180,47 @@ def fetch_history(symbol: str) -> None:
 recuperer_historique = fetch_history
 
 
+def main() -> None:
+    """Download history for the requested symbols (default: all 30).
+
+    Absorbed from the former ``run_multi_symboles.py``: loops over the
+    symbol list, keeps going on per-symbol failures, and prints a
+    success/failure summary at the end.
+    """
+    parser = argparse.ArgumentParser(
+        description="Download 3 years of 5-min bars from Twelve Data."
+    )
+    parser.add_argument(
+        "symbols", nargs="*", default=list(SYMBOLS),
+        help="Symbols to download (default: the full 30-symbol universe).",
+    )
+    args = parser.parse_args()
+
+    succeeded: list[str] = []
+    failed: list[str] = []
+    t_start = datetime.now()
+
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    logger.info("%d symbols to download", len(args.symbols))
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+    for idx, symbol in enumerate(args.symbols, 1):
+        logger.info("[%d/%d] Starting %s...", idx, len(args.symbols), symbol)
+        try:
+            fetch_history(symbol)
+            succeeded.append(symbol)
+        except Exception as exc:
+            logger.error("  ✗ %s failed: %s", symbol, exc)
+            failed.append(symbol)
+
+    duration = datetime.now() - t_start
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    logger.info("Done in %s", str(duration).split(".")[0])
+    logger.info("✓ Success: %d — %s", len(succeeded), ", ".join(succeeded))
+    if failed:
+        logger.warning("✗ Failed:  %d — %s", len(failed), ", ".join(failed))
+    logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+
 if __name__ == "__main__":
-    fetch_history("AAPL")
+    main()
