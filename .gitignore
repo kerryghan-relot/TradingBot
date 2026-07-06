@@ -9,6 +9,13 @@ lucas-live-trading/config.json
 lucas-live-trading/backups/
 lucas-live-trading/scorer_task.log
 
+# lucas-trading runtime state (auto-generated at first run)
+lucas-trading/bars.db
+lucas-trading/config/config.json
+lucas-trading/backups/
+lucas-trading/scorer_task.log
+results/
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
