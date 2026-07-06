@@ -39,7 +39,7 @@ scp /c/Users/Lucas/Documents/TradingBot/.env user@VPS_IP:~/TradingBot/.env
 
 ```bash
 cd ~/TradingBot
-sudo bash lucas-live-trading/deploy/scripts/setup_vps.sh
+sudo bash lucas-trading/deploy/scripts/setup_vps.sh
 ```
 
 Il va demander un nom d'utilisateur + mot de passe pour l'accès au
@@ -66,10 +66,10 @@ git pull
 sudo systemctl restart tradingbot-bot tradingbot-dashboard
 
 # Lancer le scorer manuellement (dry-run)
-.venv/bin/python lucas-live-trading/scorer.py --dry-run
+cd lucas-trading && ../.venv/bin/python -m live.scorer --dry-run
 
 # Voir les sauvegardes de la base
-ls -lh lucas-live-trading/backups/
+ls -lh lucas-trading/backups/
 ```
 
 ## Migrer vers un vrai domaine plus tard

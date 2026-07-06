@@ -6,8 +6,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=__DEPLOY_USER__
-WorkingDirectory=__REPO_DIR__
-ExecStart=__REPO_DIR__/.venv/bin/python lucas-live-trading/bot.py
+WorkingDirectory=__REPO_DIR__/lucas-trading
+ExecStart=__REPO_DIR__/.venv/bin/python -m live.bot
 Restart=always
 RestartSec=10
 Environment=PYTHONUNBUFFERED=1

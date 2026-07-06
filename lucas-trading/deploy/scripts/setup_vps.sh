@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-shot Ubuntu VPS setup for lucas-live-trading.
+# One-shot Ubuntu VPS setup for lucas-trading.
 # =====================================================
 # Installs Nginx (reverse proxy + self-signed TLS + basic auth),
 # firewall rules, the Python environment (via uv), and systemd
@@ -32,8 +32,8 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-LIVE_DIR="$(cd "$DEPLOY_DIR/.." && pwd)"
-REPO_DIR="$(cd "$LIVE_DIR/.." && pwd)"
+TRADING_DIR="$(cd "$DEPLOY_DIR/.." && pwd)"
+REPO_DIR="$(cd "$TRADING_DIR/.." && pwd)"
 
 echo "== Repertoire du repo : $REPO_DIR"
 echo "== Utilisateur du bot : $DEPLOY_USER"
@@ -134,7 +134,7 @@ echo "             tant qu'aucun nom de domaine n'est configure)"
 echo ""
 echo " Statut des services : systemctl status tradingbot-bot tradingbot-dashboard"
 echo " Logs live           : journalctl -u tradingbot-bot -f"
-echo " Logs applicatifs    : $LIVE_DIR/bot.log , $LIVE_DIR/scorer_task.log"
-echo " Scorer hebdo        : dimanche 18h  (voir $LIVE_DIR/scorer_task.log)"
-echo " Backup DB quotidien : 02h00         ($LIVE_DIR/backups/)"
+echo " Logs applicatifs    : $TRADING_DIR/bot.log , $TRADING_DIR/scorer_task.log"
+echo " Scorer hebdo        : dimanche 18h  (voir $TRADING_DIR/scorer_task.log)"
+echo " Backup DB quotidien : 02h00         ($TRADING_DIR/backups/)"
 echo "════════════════════════════════════════════════════════════════"

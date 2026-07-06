@@ -8,15 +8,15 @@
 #
 # Install as a daily cron job (02:00) with:
 #   crontab -e
-#   0 2 * * * /path/to/lucas-live-trading/deploy/scripts/backup_db.sh
+#   0 2 * * * /path/to/lucas-trading/deploy/scripts/backup_db.sh
 #
 # (setup_vps.sh installs this automatically.)
 
 set -uo pipefail
 
-LIVE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-DB_FILE="$LIVE_DIR/bars.db"
-BACKUP_DIR="$LIVE_DIR/backups"
+TRADING_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+DB_FILE="$TRADING_DIR/bars.db"
+BACKUP_DIR="$TRADING_DIR/backups"
 RETENTION_DAYS=30
 
 mkdir -p "$BACKUP_DIR"

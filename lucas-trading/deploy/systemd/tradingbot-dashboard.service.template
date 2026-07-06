@@ -6,8 +6,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=__DEPLOY_USER__
-WorkingDirectory=__REPO_DIR__
-ExecStart=__REPO_DIR__/.venv/bin/streamlit run lucas-live-trading/dashboard.py \
+WorkingDirectory=__REPO_DIR__/lucas-trading
+ExecStart=__REPO_DIR__/.venv/bin/streamlit run live/dashboard.py \
     --server.address 127.0.0.1 \
     --server.port 8501 \
     --server.headless true \
