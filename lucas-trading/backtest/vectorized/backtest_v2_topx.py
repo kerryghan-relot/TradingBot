@@ -31,12 +31,12 @@ never touched while calibrating V2's thresholds):
 
 Usage::
 
-    python backtest_v2_topx.py
+    python -m backtest.vectorized.backtest_v2_topx
 
 Outputs::
 
-    resultats/v2_topx_equity.csv
-    resultats/v2_topx_selection.csv
+    results/v2_topx_equity.csv
+    results/v2_topx_selection.csv
 """
 
 import logging
@@ -45,7 +45,7 @@ import time
 import numpy as np
 import pandas as pd
 
-from backtest_v2_regime_mr import (
+from backtest.vectorized.backtest_v2_regime_mr import (
     COST_PER_SIDE,
     Params,
     TRAIN_RATIO,
@@ -55,7 +55,7 @@ from backtest_v2_regime_mr import (
     sharpe,
     simulate,
 )
-from config import OUTPUT_DIR
+from core.constants import OUTPUT_DIR
 
 logging.basicConfig(
     level=logging.INFO,

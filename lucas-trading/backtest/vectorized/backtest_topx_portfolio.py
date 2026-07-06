@@ -11,14 +11,14 @@ P&L — not buy-and-hold.
 
 Usage::
 
-    python backtest_topx_portfolio.py
+    python -m backtest.vectorized.backtest_topx_portfolio
 
 Outputs::
 
-    resultats/scores_topx.csv
-    resultats/weights_topx.csv
-    resultats/equity_topx.csv
-    resultats/topx_report.html
+    results/scores_topx.csv
+    results/weights_topx.csv
+    results/equity_topx.csv
+    results/topx_report.html
 """
 
 import gc
@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 import vectorbt as vbt
 
-from config import (
+from core.constants import (
     ANNUALIZATION,
     BARS_PER_WEEK,
     CAPITAL_INITIAL,
@@ -37,7 +37,7 @@ from config import (
     FEES,
     OUTPUT_DIR,
 )
-from strategies import STRATEGIES
+from backtest.vectorized.strategies_vbt import STRATEGIES
 
 logging.basicConfig(
     level=logging.INFO,

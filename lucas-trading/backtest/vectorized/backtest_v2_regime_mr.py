@@ -31,12 +31,12 @@ Costs: 0.10 % per side (fee + slippage), same as backtest_scorer_oos.
 
 Usage::
 
-    python backtest_v2_regime_mr.py
+    python -m backtest.vectorized.backtest_v2_regime_mr
 
 Outputs::
 
-    resultats/v2_regime_mr_results.csv
-    resultats/v2_regime_mr_equity.csv
+    results/v2_regime_mr_results.csv
+    results/v2_regime_mr_equity.csv
 """
 
 import logging
@@ -47,7 +47,7 @@ from itertools import product
 import numpy as np
 import pandas as pd
 
-from config import DATA_DIR, FEES, OUTPUT_DIR
+from core.constants import DATA_DIR, FEES, OUTPUT_DIR
 
 logging.basicConfig(
     level=logging.INFO,

@@ -29,13 +29,13 @@ Caveats
 
 Usage::
 
-    python backtest_scorer_oos.py
+    python -m backtest.vectorized.backtest_scorer_oos
 
 Outputs::
 
-    resultats/scorer_oos_equity.csv
-    resultats/scorer_oos_selection.csv
-    resultats/scorer_oos_report.html
+    results/scorer_oos_equity.csv
+    results/scorer_oos_selection.csv
+    results/scorer_oos_report.html
 """
 
 import logging
@@ -45,7 +45,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
-from config import DATA_DIR, FEES, OUTPUT_DIR
+from core.constants import DATA_DIR, FEES, OUTPUT_DIR
 
 logging.basicConfig(
     level=logging.INFO,

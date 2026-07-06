@@ -6,8 +6,8 @@ Tests all parameter combinations for the 4 active signals across
 all available CSV symbols.
 
 Outputs:
-    resultats/hyperparams_resultats.csv  (sorted by mean Alpha vs B&H)
-    resultats/hyperparams_top.html       (top-50 readable table)
+    results/hyperparams_resultats.csv  (sorted by mean Alpha vs B&H)
+    results/hyperparams_top.html       (top-50 readable table)
 
 Strategy:
     Exhaustive grid search per signal individually.
@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 import vectorbt as vbt
 
-from config import ANNUALIZATION, CAPITAL_INITIAL, DATA_DIR, FEES, OUTPUT_DIR
+from core.constants import ANNUALIZATION, CAPITAL_INITIAL, DATA_DIR, FEES, OUTPUT_DIR
 
 logging.basicConfig(
     level=logging.INFO,

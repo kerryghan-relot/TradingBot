@@ -7,17 +7,17 @@ writes, explicit garbage collection after each portfolio.
 
 Usage::
 
-    python backtest_multi.py                  # vote strategies, table only
-    python backtest_multi.py --html           # vote strategies + Plotly charts
-    python backtest_multi.py --ml             # RandomForest strategy
-    python backtest_multi.py --ml --html      # RF + Plotly charts
-    python backtest_multi.py --walk-forward   # out-of-sample last 30 %
-    python backtest_multi.py --walk-forward --test-ratio 0.25
+    python -m backtest.vectorized.backtest_multi                  # vote strategies, table only
+    python -m backtest.vectorized.backtest_multi --html           # vote strategies + Plotly charts
+    python -m backtest.vectorized.backtest_multi --ml             # RandomForest strategy
+    python -m backtest.vectorized.backtest_multi --ml --html      # RF + Plotly charts
+    python -m backtest.vectorized.backtest_multi --walk-forward   # out-of-sample last 30 %
+    python -m backtest.vectorized.backtest_multi --walk-forward --test-ratio 0.25
 
 Outputs:
-    resultats/resultats_backtest.csv
-    resultats/resultats_backtest.html
-    resultats/{SYMBOL}_backtest.html  (only with --html)
+    results/resultats_backtest.csv
+    results/resultats_backtest.html
+    results/{SYMBOL}_backtest.html  (only with --html)
 """
 
 import argparse
@@ -30,7 +30,7 @@ import numpy as np
 import pandas as pd
 import vectorbt as vbt
 
-from config import CAPITAL_INITIAL, DATA_DIR, FEES, OUTPUT_DIR
+from core.constants import CAPITAL_INITIAL, DATA_DIR, FEES, OUTPUT_DIR
 
 logging.basicConfig(
     level=logging.INFO,
@@ -69,9 +69,9 @@ _parser.add_argument(
 args = _parser.parse_args()
 
 if args.ml:
-    from strategies_ML import STRATEGIES
+    from backtest.vectorized.strategies_ml import STRATEGIES
 else:
-    from strategies import STRATEGIES
+    from backtest.vectorized.strategies_vbt import STRATEGIES
 
 # Output filename encodes the run mode so multiple runs coexist
 _suffix = ("_ml" if args.ml else "") + ("_wf" if args.walk_forward else "")

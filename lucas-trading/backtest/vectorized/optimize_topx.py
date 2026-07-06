@@ -10,12 +10,12 @@ This is the TopX equivalent of optimize.py: same idea, different framework.
 
 Usage::
 
-    python optimize_topx.py
+    python -m backtest.vectorized.optimize_topx
 
 Outputs::
 
-    resultats/optimize_topx_resultats.csv
-    resultats/optimize_topx_top.html
+    results/optimize_topx_resultats.csv
+    results/optimize_topx_top.html
 """
 
 import gc
@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 import vectorbt as vbt
 
-from config import (
+from core.constants import (
     ANNUALIZATION,
     BARS_PER_WEEK,
     CAPITAL_INITIAL,
@@ -34,7 +34,7 @@ from config import (
     FEES,
     OUTPUT_DIR,
 )
-from strategies import STRATEGIES
+from backtest.vectorized.strategies_vbt import STRATEGIES
 
 logging.basicConfig(
     level=logging.INFO,

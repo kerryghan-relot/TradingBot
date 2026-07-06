@@ -1,7 +1,7 @@
 """
 Unified Research Dashboard — All testing methods in one place.
 =============================================================
-Launch: streamlit run research/dashboard.py
+Launch (from lucas-trading/): streamlit run backtest/dashboard.py
 
 Pages:
   1. Stratégies Vote     — vote-based backtest + walk-forward comparison
@@ -19,8 +19,10 @@ import streamlit as st
 from pathlib import Path
 
 # ── Paths ────────────────────────────────────────────────────────
+# Resolved relative to this file (backtest/ → lucas-trading/) so the
+# dashboard works no matter where streamlit is launched from.
 BASE_DIR = Path(__file__).resolve().parent.parent
-RESULTS_DIR = BASE_DIR / "resultats"
+RESULTS_DIR = BASE_DIR / "results"
 DATA_DIR = BASE_DIR / "data"
 
 CSV_VOTE = RESULTS_DIR / "resultats_backtest.csv"
