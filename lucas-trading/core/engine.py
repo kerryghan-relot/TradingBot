@@ -22,7 +22,7 @@ stop-loss execution, or persistence — those belong to the callers
 from collections import deque
 from dataclasses import dataclass
 
-from signals import (
+from core.signals import (
     sig_bb,
     sig_ema_cross,
     sig_kalman_zscore,
