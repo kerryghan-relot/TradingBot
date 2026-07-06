@@ -1,8 +1,10 @@
 # Plan de fusion `lucas-research` + `lucas-live-trading`
 
 Branche de travail : `refactor/fusion-research-live`.
-Statut : **en attente de validation** — rien n'est déplacé tant que le plan
-n'est pas approuvé.
+Statut : **exécuté** (plan validé par Lucas le 2026-07-06).
+Décisions retenues : dossier `lucas-trading/`, `strategies_ml.py`
+conservé dans `backtest/vectorized/`, dashboards non fusionnés.
+Voir `lucas-trading/README.md` pour le résultat final.
 
 ---
 

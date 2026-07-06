@@ -347,7 +347,7 @@ def seed(n_bars: int, reset: bool) -> None:
         f"   DB : {DB_FILE}\n"
     )
     print("Lance maintenant :\n"
-          "   streamlit run lucas-live-trading/dashboard.py\n")
+          "   streamlit run live/dashboard.py\n")
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

@@ -759,7 +759,7 @@ def main() -> None:
     """Render the full dashboard."""
     # ── Header ─────────────────────────────────────────────────────────────
     col_title, col_refresh = st.columns([5, 1])
-    col_title.title("🤖 Bot Dashboard — lucas-live-trading")
+    col_title.title("🤖 Bot Dashboard — lucas-trading")
     now_str = datetime.now(UTC).strftime("%H:%M:%S UTC")
 
     if col_refresh.button("🔄 Rafraîchir", width="stretch"):

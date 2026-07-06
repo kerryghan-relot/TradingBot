@@ -3,7 +3,7 @@ Out-of-sample validation of the scorer's top-X symbol selection.
 =================================================================
 
 Question answered: does re-selecting the top-X symbols every week by
-trailing Sharpe (the method used by lucas-live-trading/scorer.py) beat
+trailing Sharpe (the method used by live/scorer.py) beat
 simply trading the same vote strategy on ALL symbols equal-weighted?
 
 Method
@@ -12,7 +12,7 @@ Method
    vote strategy (BB + OU + VWAP + VolSpike + KalmanZ, threshold 2,
    2 % stop-loss) bar by bar with transaction costs, producing a
    per-bar strategy return series.  The signal math is a vectorised
-   replica of ``lucas-live-trading/signals.py`` (validated for parity
+   replica of ``core/signals.py`` (validated for parity
    against the live engine).
 2. Every Monday, rank symbols by annualised Sharpe over the previous
    ``LOOKBACK_DAYS`` days (exactly what scorer.py does) and hold the
@@ -54,7 +54,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ── Strategy configuration (mirrors lucas-live-trading defaults) ─────
+# ── Strategy configuration (mirrors the live defaults) ──────────────
 CFG: dict = {
     "active_signals": ["BB", "OU", "VWAP", "VolSpike", "KalmanZ"],
     "vote_threshold": 2,

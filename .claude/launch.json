@@ -6,7 +6,7 @@
             "runtimeExecutable": ".venv/Scripts/python.exe",
             "runtimeArgs": [
                 "-m", "streamlit", "run",
-                "lucas-live-trading/dashboard.py",
+                "lucas-trading/live/dashboard.py",
                 "--server.headless", "true",
                 "--server.port", "8502",
                 "--browser.gatherUsageStats", "false"

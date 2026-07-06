@@ -18,7 +18,7 @@ portfolio away from falling knives:
 
 Within the eligible pool, symbols are ranked every week by trailing
 Sharpe of their OWN V2 strategy returns (same metric as
-lucas-live-trading/scorer.py) and the TOP_X highest-ranked are held
+live/scorer.py) and the TOP_X highest-ranked are held
 equal-weighted for the following week.
 
 Four portfolios are compared over the TEST period only (the period

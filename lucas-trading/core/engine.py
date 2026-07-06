@@ -1,5 +1,5 @@
 """
-Shared vote engine — lucas-live-trading.
+Shared vote engine — lucas-trading/core.
 =========================================
 
 Single implementation of the per-bar signal-evaluation loop used by

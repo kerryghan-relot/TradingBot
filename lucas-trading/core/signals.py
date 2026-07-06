@@ -1,5 +1,5 @@
 """
-Streaming signal functions — lucas-live-trading.
+Streaming signal functions — lucas-trading/core.
 =================================================
 
 All functions are pure (no side effects) and operate on plain Python
@@ -9,7 +9,7 @@ lists of recent values (oldest first).  Each signal returns a
 Stateful signals (KalmanZ, VWAP, ORB) also return updated state so
 the caller (AssetState) can persist it between bars.
 
-Naming mirrors lucas-research/strategies.py so parameters from the
+Naming mirrors backtest/vectorized/strategies_vbt.py so parameters from the
 research backtests can be transferred directly.
 """
 
