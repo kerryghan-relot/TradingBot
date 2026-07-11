@@ -1,0 +1,29 @@
+# Virtualenvs & Python caches
+.venv/
+**/__pycache__/
+**/*.pyc
+
+# Node / frontend build artefacts (rebuilt inside the image)
+**/node_modules/
+lucas-trading/web/frontend/dist/
+
+# Legacy SQLite store & backups
+lucas-trading/bars.db
+lucas-trading/bars.db-*
+lucas-trading/backups/
+
+# Runtime data we never want baked into the image
+lucas-trading/logs/
+lucas-trading/results/
+**/*.log
+
+# VCS & local tooling
+.git/
+.gitignore
+.claude/
+.env
+.env.*
+
+# Docs / planning
+*.md
+!lucas-trading/README.md

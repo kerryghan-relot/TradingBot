@@ -3,15 +3,12 @@
     "configurations": [
         {
             "name": "dashboard",
-            "runtimeExecutable": ".venv/Scripts/python.exe",
+            "runtimeExecutable": "bash",
             "runtimeArgs": [
-                "-m", "streamlit", "run",
-                "lucas-trading/live/dashboard.py",
-                "--server.headless", "true",
-                "--server.port", "8502",
-                "--browser.gatherUsageStats", "false"
+                "-lc",
+                "cd lucas-trading && exec ../.venv/bin/python -m web.run --port 8501"
             ],
-            "port": 8502,
+            "port": 8501,
             "autoPort": false
         }
     ]

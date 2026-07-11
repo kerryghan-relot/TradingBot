@@ -11,12 +11,13 @@ lucas-trading/
 ├── strategies/        # une stratégie = un fichier (config du moteur de vote)
 ├── core/              # code partagé : signaux, moteur, broker, config, métriques
 ├── backtest/          # moteur événementiel + scripts vectorbt (recherche rapide)
-├── live/              # bot Alpaca, scorer hebdo, dashboard temps réel
+├── live/              # bot Alpaca, scorer hebdo
+├── web/               # dashboard temps réel (API Flask + front React)
 ├── tools/             # téléchargement d'historique, données factices
 ├── config/            # config.json (runtime, gitignoré) + exemple versionné
 ├── data/              # CSV 5-min 3 ans par symbole (gitignoré)
 ├── results/           # sorties de backtests (gitignoré)
-├── deploy/            # systemd + nginx + scripts VPS et Windows
+├── deploy/            # Docker Compose : nginx + scheduler + setup VPS
 ├── docs/              # guide des signaux et méthodes
 ├── archive/           # fichiers retirés, gardés pour vérification
 ├── backtest.py        # CLI backtest
@@ -93,7 +94,31 @@ Clés Alpaca dans `.env` à la racine du repo (`ALPACA_API_KEY`,
 `ALPACA_SECRET_KEY`). Le bot est en paper trading (`PAPER = True`
 dans `core/broker.py`).
 
-Suivi : `streamlit run live/dashboard.py`, logs dans `bot.log`.
+Suivi : dashboard web temps réel, logs dans `bot.log`.
+
+### Dashboard web (live/monitoring)
+
+Nouveau front (remplace l'ancien dashboard Streamlit) : API JSON Flask
++ interface React reprenant le design AlgoDesk. Il lit la base
+PostgreSQL + le compte Alpaca et bascule automatiquement en mode
+démonstration (données fictives) tant qu'aucune source réelle n'est
+disponible.
+
+```bash
+# 1. Builder le front une fois (ou après modif du front)
+cd web/frontend && npm install && npm run build && cd ../..
+
+# 2. Lancer le serveur (sert le front + l'API sur le même port)
+python -m web.run                 # http://127.0.0.1:8501
+
+# Développement du front avec hot-reload (proxy /api vers Flask) :
+#   terminal A : python -m web.run
+#   terminal B : cd web/frontend && npm run dev   # http://127.0.0.1:5173
+```
+
+L'onglet **Configuration** édite `config/config.json` (signaux, seuils,
+sizing, symboles) directement depuis le navigateur — le bot recharge à
+chaud.
 
 ## Scorer hebdomadaire
 
@@ -102,11 +127,20 @@ python -m live.scorer --dry-run   # aperçu du classement
 python -m live.scorer             # écrit le top-X dans config.json
 ```
 
-Planification : tâche Windows via
-`deploy/scripts/run_scorer.ps1` (instructions en tête de fichier),
-cron VPS via `deploy/scripts/run_scorer.sh`.
+Planification : le service `scheduler` (ofelia) du stack Docker lance
+le scorer chaque dimanche 18h — voir [deploy/README.md](deploy/README.md).
 
-## Déploiement VPS
+## Déploiement (Docker Compose)
 
-`sudo lucas-trading/deploy/scripts/setup_vps.sh` depuis la racine du
-repo — voir [deploy/README.md](deploy/README.md).
+Tout le stack (PostgreSQL, bot, dashboard, nginx, scheduler) est
+conteneurisé. Démarrage rapide depuis la racine du repo :
+
+```bash
+cp .env.example .env                          # clés Alpaca + mots de passe
+bash lucas-trading/deploy/docker/init_secrets.sh   # certs + basic auth
+docker compose up -d --build
+```
+
+Sur un VPS neuf : `sudo bash lucas-trading/deploy/scripts/setup_vps.sh`
+(installe Docker puis démarre tout) — voir
+[deploy/README.md](deploy/README.md).

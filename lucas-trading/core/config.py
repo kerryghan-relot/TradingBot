@@ -53,9 +53,9 @@ DEFAULT_CONFIG: dict = {
 
     # ── Startup backfill ──────────────────────────────────────────────
     # On launch, fetch this many days of 1-min bars from Alpaca into
-    # bars.db so the rolling windows preload fresh, continuous history
-    # and the strategy can trade soundly from the first live bar.
-    # 0 disables backfill (use only whatever is already in bars.db).
+    # the bars table so the rolling windows preload fresh, continuous
+    # history and the strategy can trade soundly from the first live
+    # bar.  0 disables backfill (use only whatever is already stored).
     "backfill_days": 7,
 
     # Vote aggregation

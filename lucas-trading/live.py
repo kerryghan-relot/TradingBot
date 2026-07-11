@@ -63,8 +63,8 @@ def main() -> None:
     strategy = load_strategy(args.strategy)
     _sync_config(strategy)
 
-    # Importé ici seulement: live.bot vérifie .env et ouvre bars.db à
-    # l'import — inutile avant d'avoir validé la stratégie demandée.
+    # Importé ici seulement: live.bot vérifie .env et se connecte à la
+    # base à l'import — inutile avant d'avoir validé la stratégie demandée.
     from live.bot import main as run_bot
     run_bot()
 

@@ -1,0 +1,109 @@
+name: tradingbot
+
+# Full stack: PostgreSQL + live bot + web dashboard + nginx reverse
+# proxy + ofelia scheduler (weekly scorer, daily backup).
+#
+# Copy .env.example to .env and fill in the Alpaca keys / dashboard
+# credentials before `docker compose up -d`.
+
+x-app-env: &app-env
+  DATABASE_URL: postgresql://${POSTGRES_USER:-tradingbot}:${POSTGRES_PASSWORD:-tradingbot}@db:5432/${POSTGRES_DB:-tradingbot}
+  ALPACA_API_KEY: ${ALPACA_API_KEY:-}
+  ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY:-}
+  TZ: ${TZ:-UTC}
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tradingbot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tradingbot}
+      POSTGRES_DB: ${POSTGRES_DB:-tradingbot}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tradingbot} -d ${POSTGRES_DB:-tradingbot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    labels:
+      ofelia.enabled: "true"
+      # Daily backup at 02:00 — pg_dump (gzip) + 30-day retention.
+      ofelia.job-exec.backup.schedule: "0 0 2 * * *"
+      ofelia.job-exec.backup.command: >-
+        sh -c 'pg_dump -U ${POSTGRES_USER:-tradingbot} ${POSTGRES_DB:-tradingbot}
+        | gzip > /backups/tradingbot_$(date +%Y%m%d_%H%M%S).sql.gz
+        && find /backups -name "*.sql.gz" -mtime +30 -delete'
+
+  bot:
+    build: .
+    image: tradingbot-app
+    pull_policy: never
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment: *app-env
+    command: ["python", "-m", "live.bot"]
+    volumes:
+      - ./lucas-trading/config:/app/lucas-trading/config
+      - logs:/app/lucas-trading/logs
+    labels:
+      ofelia.enabled: "true"
+      # Weekly scorer, Sundays 18:00 — re-ranks symbols, writes
+      # config.json; the bot hot-reloads the list within ~30 s.
+      ofelia.job-exec.scorer.schedule: "0 0 18 * * 0"
+      ofelia.job-exec.scorer.command: "python -m live.scorer"
+
+  web:
+    build: .
+    image: tradingbot-app
+    pull_policy: never
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment: *app-env
+    command:
+      - gunicorn
+      - --workers=2
+      - --bind=0.0.0.0:8501
+      - --access-logfile=-
+      - web.server.app:create_app()
+    volumes:
+      - ./lucas-trading/config:/app/lucas-trading/config
+      - logs:/app/lucas-trading/logs
+    expose:
+      - "8501"
+
+  nginx:
+    image: nginx:alpine
+    restart: always
+    depends_on:
+      - web
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./lucas-trading/deploy/docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./lucas-trading/deploy/docker/certs:/etc/nginx/ssl:ro
+      - ./lucas-trading/deploy/docker/.htpasswd:/etc/nginx/.htpasswd-tradingbot:ro
+      - certbot-webroot:/var/www/certbot
+
+  scheduler:
+    image: mcuadros/ofelia:latest
+    restart: always
+    depends_on:
+      - bot
+      - db
+    command: daemon --docker
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+volumes:
+  pgdata:
+  logs:
+  backups:
+  certbot-webroot:

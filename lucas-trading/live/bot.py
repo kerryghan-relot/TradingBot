@@ -25,25 +25,26 @@ Strategy: majority-vote signal engine
 Active signals and all thresholds live in ``config.json`` and are
 hot-reloaded on every bar tick — no restart required.
 
-Database  : bars.db  (SQLite, auto-created on first run)
+Database  : PostgreSQL (schema auto-created on first run — see core/db.py)
 Config    : config/config.json (hot-reloaded every bar)
-Log       : bot.log (rotating, 5 MB per file, 3 backups)
+Log       : logs/bot.log (rotating, 5 MB per file, 3 backups)
 
 Requirements:
-    pip install alpaca-py python-dotenv
+    pip install alpaca-py python-dotenv psycopg[binary]
 
 Environment variables (.env):
     ALPACA_API_KEY
     ALPACA_SECRET_KEY
+    DATABASE_URL   (defaults to the compose ``db`` service)
 """
 
 import asyncio
-import sqlite3
 import logging
 import time
 from datetime import datetime, timedelta, UTC
 from logging.handlers import RotatingFileHandler
-from pathlib import Path
+
+import psycopg
 
 from alpaca.data.enums import DataFeed
 from alpaca.data.live.crypto import CryptoDataStream
@@ -51,6 +52,7 @@ from alpaca.data.live.stock import StockDataStream
 from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.trading.requests import MarketOrderRequest
 
+from core import db
 from core.broker import (
     API_KEY,
     API_SECRET,
@@ -61,13 +63,11 @@ from core.broker import (
     make_trading_client,
 )
 from core.config import DEFAULT_CONFIG, load_config
-from core.constants import CONFIG_FILE, DB_FILE, ROOT_DIR
+from core.constants import CONFIG_FILE, LOG_FILE
 from core.engine import DEQUE_SIZE, SignalState, evaluate_bar
 
 
 # ── Static config (restart required to change) ────────────────────────────────
-
-LOG_FILE: Path = ROOT_DIR / "bot.log"
 
 # DEQUE_SIZE (rolling-window capacity) lives in engine.py — shared
 # with scorer.py so live bot and simulation always match.
@@ -122,118 +122,15 @@ log: logging.Logger = setup_logging()
 #  Database
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _ddl_trace(stmt: str) -> None:
-    """Log DDL statements (``CREATE``, ``DROP``, ``ALTER``) only.
-
-    Registered temporarily via ``sqlite3.set_trace_callback()`` during
-    schema initialisation.  Removed immediately after.
-
-    Args:
-        stmt (str): Raw SQL statement provided by SQLite.
-    """
-    keyword = stmt.strip().split()[0].upper()
-    if keyword in ("CREATE", "DROP", "ALTER"):
-        log.info(f"🗄️  DDL: {' '.join(stmt.split())}")
-
-
-def init_db(conn: sqlite3.Connection) -> None:
-    """Initialise the database schema (idempotent — safe to call on every start).
-
-    Creates three tables:
-
-    **bars** — raw, immutable OHLCVT market data.  One row per closed
-    1-minute candle per symbol.  Written before any signal logic so the
-    record survives even if evaluation raises.
-
-    **indicators** — per-bar snapshot of vote results.  Lighter than
-    Kerry's schema — full indicator values live in ``bars``; we only
-    store what's needed for post-hoc analysis of trade decisions.
-
-    **trades** — one row per order accepted by Alpaca (BUY and SELL),
-    with the realised P&L computed on exits.  This is the local source
-    of truth for per-trade performance analysis in the dashboard,
-    independent of the Alpaca order history.
-
-    ``bars`` and ``indicators`` use ``(symbol, timestamp)`` as a
-    composite primary key.  DDL statements are traced to the log
-    during this call only.
-
-    Args:
-        conn (sqlite3.Connection): Open SQLite connection to ``bars.db``.
-    """
-    conn.set_trace_callback(_ddl_trace)
-
-    # WAL mode: readers never block writers and vice-versa — critical
-    # when the dashboard reads while the bot writes every minute.
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS bars (
-            symbol     TEXT    NOT NULL,
-            timestamp  TEXT    NOT NULL,
-            open       REAL    NOT NULL,
-            high       REAL    NOT NULL,
-            low        REAL    NOT NULL,
-            close      REAL    NOT NULL,
-            volume     REAL    NOT NULL,
-            PRIMARY KEY (symbol, timestamp)
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS indicators (
-            symbol      TEXT     NOT NULL,
-            timestamp   TEXT     NOT NULL,
-            close       REAL,
-            vol_avg     REAL,
-            vol_spike   INTEGER,
-            buy_votes   INTEGER,
-            sell_votes  INTEGER,
-            n_signals   INTEGER,
-            signal      TEXT,
-            PRIMARY KEY (symbol, timestamp),
-            FOREIGN KEY (symbol, timestamp)
-                REFERENCES bars (symbol, timestamp)
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS trades (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            symbol      TEXT    NOT NULL,
-            timestamp   TEXT    NOT NULL,
-            side        TEXT    NOT NULL,
-            qty         REAL    NOT NULL,
-            price       REAL    NOT NULL,
-            reason      TEXT    NOT NULL,
-            order_id    TEXT,
-            entry_price REAL,
-            pnl_pct     REAL
-        )
-    """)
-    conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_bars_symbol_ts
-        ON bars (symbol, timestamp)
-    """)
-    conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_indicators_symbol_ts
-        ON indicators (symbol, timestamp)
-    """)
-    conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_trades_symbol_ts
-        ON trades (symbol, timestamp)
-    """)
-    conn.commit()
-    conn.set_trace_callback(None)
-
-
-def save_bar(conn: sqlite3.Connection, symbol: str, bar) -> None:
+def save_bar(conn: psycopg.Connection, symbol: str, bar) -> None:
     """Persist one raw OHLCVT bar to the ``bars`` table.
 
-    Uses ``INSERT OR IGNORE`` — duplicate bars delivered on reconnect
-    are silently skipped.  Must be called before ``_evaluate()``.
+    Uses ``ON CONFLICT DO NOTHING`` — duplicate bars delivered on
+    reconnect are silently skipped.  Must be called before
+    ``_evaluate()``.
 
     Args:
-        conn   (sqlite3.Connection): Open connection to ``bars.db``.
+        conn   (psycopg.Connection): Open connection to the database.
         symbol (str)               : Asset identifier, e.g. ``"BTC/USD"``.
         bar                        : Bar object from ``CryptoDataStream``
             with attributes ``timestamp``, ``open``, ``high``, ``low``,
@@ -241,9 +138,10 @@ def save_bar(conn: sqlite3.Connection, symbol: str, bar) -> None:
     """
     conn.execute(
         """
-        INSERT OR IGNORE INTO bars
+        INSERT INTO bars
             (symbol, timestamp, open, high, low, close, volume)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (symbol, timestamp) DO NOTHING
         """,
         (
             symbol,
@@ -255,11 +153,10 @@ def save_bar(conn: sqlite3.Connection, symbol: str, bar) -> None:
             float(bar.volume),
         ),
     )
-    conn.commit()
 
 
 def save_indicators(
-    conn:       sqlite3.Connection,
+    conn:       psycopg.Connection,
     symbol:     str,
     timestamp:  str,
     close:      float,
@@ -272,11 +169,11 @@ def save_indicators(
 ) -> None:
     """Persist the vote-engine snapshot for one bar.
 
-    Uses ``INSERT OR IGNORE`` so a double evaluation never overwrites
-    the first result.
+    Uses ``ON CONFLICT DO NOTHING`` so a double evaluation never
+    overwrites the first result.
 
     Args:
-        conn       (sqlite3.Connection): Open connection.
+        conn       (psycopg.Connection): Open connection.
         symbol     (str): Asset identifier.
         timestamp  (str): ISO-8601 evaluation time (``datetime.now(UTC)``).
         close      (float): Bar closing price.
@@ -289,12 +186,13 @@ def save_indicators(
     """
     conn.execute(
         """
-        INSERT OR IGNORE INTO indicators (
+        INSERT INTO indicators (
             symbol, timestamp, close,
             vol_avg, vol_spike,
             buy_votes, sell_votes, n_signals,
             signal
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (symbol, timestamp) DO NOTHING
         """,
         (
             symbol, timestamp, close,
@@ -303,11 +201,10 @@ def save_indicators(
             signal,
         ),
     )
-    conn.commit()
 
 
 def save_trade(
-    conn:        sqlite3.Connection,
+    conn:        psycopg.Connection,
     symbol:      str,
     timestamp:   str,
     side:        str,
@@ -325,7 +222,7 @@ def save_trade(
     market order may differ slightly (slippage).
 
     Args:
-        conn        (sqlite3.Connection): Open connection.
+        conn        (psycopg.Connection): Open connection.
         symbol      (str): Asset identifier, e.g. ``"AAPL"``.
         timestamp   (str): ISO-8601 execution time (UTC).
         side        (str): ``"BUY"`` or ``"SELL"``.
@@ -343,18 +240,17 @@ def save_trade(
         INSERT INTO trades (
             symbol, timestamp, side, qty, price,
             reason, order_id, entry_price, pnl_pct
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             symbol, timestamp, side, qty, price,
             reason, order_id, entry_price, pnl_pct,
         ),
     )
-    conn.commit()
 
 
 def load_bars(
-    conn: sqlite3.Connection, symbol: str, limit: int
+    conn: psycopg.Connection, symbol: str, limit: int
 ) -> list[dict]:
     """Return the most recent bars for a symbol, oldest first.
 
@@ -363,7 +259,7 @@ def load_bars(
     deque.
 
     Args:
-        conn   (sqlite3.Connection): Open connection.
+        conn   (psycopg.Connection): Open connection.
         symbol (str): Asset identifier.
         limit  (int): Maximum rows to return (typically ``DEQUE_SIZE``).
 
@@ -376,24 +272,14 @@ def load_bars(
         """
         SELECT timestamp, open, high, low, close, volume
         FROM   bars
-        WHERE  symbol = ?
+        WHERE  symbol = %s
         ORDER  BY timestamp DESC
-        LIMIT  ?
+        LIMIT  %s
         """,
         (symbol, limit),
     ).fetchall()
 
-    return [
-        {
-            "timestamp": r[0],
-            "open":      r[1],
-            "high":      r[2],
-            "low":       r[3],
-            "close":     r[4],
-            "volume":    r[5],
-        }
-        for r in reversed(rows)
-    ]
+    return [dict(r) for r in reversed(rows)]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -462,7 +348,7 @@ class CryptoBot:
             connection behaviour.
         cfg            (dict): Current hyperparameter configuration.
         assets         (dict[str, AssetState]): Per-symbol state.
-        conn           (sqlite3.Connection): Open ``bars.db`` connection.
+        conn           (psycopg.Connection): Open PostgreSQL connection.
     """
 
     def __init__(self) -> None:
@@ -503,9 +389,12 @@ class CryptoBot:
         self._crypto_ready: asyncio.Event = asyncio.Event()
         self._stock_ready:  asyncio.Event = asyncio.Event()
 
-        self.conn: sqlite3.Connection = sqlite3.connect(DB_FILE)
-        log.info(f"🗄️  Database connected: {DB_FILE}")
-        init_db(self.conn)
+        # autocommit mirrors SQLite's per-write commit semantics and
+        # avoids Postgres' aborted-transaction pitfall (a failing
+        # statement no longer invalidates the ones that follow).
+        self.conn: psycopg.Connection = db.connect(autocommit=True)
+        log.info(f"🗄️  Database connected: {db.safe_dsn()}")
+        db.init_schema(self.conn)
         # Initialise before any method that might eventually call _reload_config.
         self._last_config_reload: float = 0.0
         self._backfill_history()
@@ -519,17 +408,19 @@ class CryptoBot:
         """Backfill recent 1-min bars from Alpaca so the bot starts warmed up.
 
         Fetches the last ``backfill_days`` of history for every symbol
-        and stores it in ``bars.db`` (``INSERT OR IGNORE`` — existing
-        rows are untouched).  Runs *before* ``_preload_from_db`` so the
+        and stores it in the ``bars`` table (``ON CONFLICT DO NOTHING``
+        — existing rows are untouched).  Runs *before* ``_preload_from_db`` so the
         rolling windows load fresh, continuous data: the strategy can
         then trade soundly from the first live bar at market open,
         instead of computing indicators over stale history (or waiting
         hours to accumulate a full window from scratch).
 
-        Bars are inserted in one batch per symbol (a single commit) —
-        a per-row commit over a week of 1-min data would be far too
-        slow.  Network or auth failures are logged and swallowed: the
-        bot falls back to whatever history is already in ``bars.db``.
+        Bars are inserted in one batch per symbol (a single
+        transaction) — a per-row commit over a week of 1-min data would
+        be far too slow, so the batch is wrapped in an explicit
+        transaction even though the connection is in autocommit mode.
+        Network or auth failures are logged and swallowed: the bot
+        falls back to whatever history is already in the database.
         """
         days = int(self.cfg.get("backfill_days", 0))
         if days <= 0:
@@ -556,15 +447,17 @@ class CryptoBot:
                 for b in bars
             ]
             if rows:
-                self.conn.executemany(
-                    """
-                    INSERT OR IGNORE INTO bars
-                        (symbol, timestamp, open, high, low, close, volume)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    rows,
-                )
-                self.conn.commit()
+                with self.conn.transaction():
+                    self.conn.cursor().executemany(
+                        """
+                        INSERT INTO bars
+                            (symbol, timestamp, open, high, low,
+                             close, volume)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (symbol, timestamp) DO NOTHING
+                        """,
+                        rows,
+                    )
             total += len(rows)
             log.info(f"   {symbol}: {len(rows)} bars")
 
@@ -669,7 +562,7 @@ class CryptoBot:
         an orphan position.
 
         Added symbols get a fresh ``AssetState`` preloaded from any
-        ``bars.db`` history, then a live subscription.  A stream that
+        stored bar history, then a live subscription.  A stream that
         had no symbols until now is started on the spot via its ready
         event.
 
@@ -1136,7 +1029,7 @@ class CryptoBot:
                triggers live subscribe/unsubscribe + liquidation).
             2. Route bar to the correct ``AssetState``.
             3. Detect session date rollover → reset VWAP / ORB state.
-            4. Persist the raw OHLCVT bar to ``bars.db``.
+            4. Persist the raw OHLCVT bar to the ``bars`` table.
             5. Append OHLCV to the asset's rolling deques.
             6. Run ``_evaluate()``.
 
@@ -1249,7 +1142,7 @@ class CryptoBot:
             self._stock_ready.set()
             log.info(f"📡 Stock   stream → {self._stock_syms}")
 
-        log.info(f"   DB  : {DB_FILE}")
+        log.info(f"   DB  : {db.safe_dsn()}")
         log.info(f"   Log : {LOG_FILE}")
         log.info(f"   Watching {CONFIG_FILE.name} for live config changes…\n")
 
@@ -1290,7 +1183,7 @@ class CryptoBot:
             except Exception as e:
                 log.warning(f"⚠️  Error stopping {name} stream: {e}")
         self.conn.close()
-        log.info(f"🗄️  Database connection closed: {DB_FILE}")
+        log.info("🗄️  Database connection closed.")
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────

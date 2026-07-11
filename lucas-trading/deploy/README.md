@@ -1,94 +1,105 @@
-# Déploiement sur VPS Ubuntu
+# Déploiement — Docker Compose
 
-Met le bot, le dashboard, le scorer hebdomadaire et les sauvegardes en
-service permanent sur un VPS, accessible via HTTPS + mot de passe.
+Tout le stack (PostgreSQL, bot, dashboard, scorer, backups, reverse
+proxy) tourne en conteneurs, orchestré par `docker-compose.yml` à la
+racine du repo. Accès au dashboard via HTTPS + mot de passe.
 
-## Ce que ça installe
+## Les services
 
-- `tradingbot-bot.service` — `bot.py`, redémarre automatiquement en cas
-  de crash ou de reboot du VPS.
-- `tradingbot-dashboard.service` — Streamlit, bindé sur `127.0.0.1`
-  uniquement (jamais exposé directement).
-- Nginx en reverse proxy sur le port 443, avec certificat TLS
-  auto-signé et authentification HTTP basique devant le dashboard.
-- `ufw` : seuls SSH, 80 et 443 sont ouverts.
-- Cron : scorer chaque dimanche 18h, backup de `bars.db` chaque nuit
-  à 2h (rétention 30 jours).
+| Service     | Rôle |
+|-------------|------|
+| `db`        | PostgreSQL 16 (volume `pgdata`). Remplace l'ancien `bars.db`. |
+| `bot`       | `python -m live.bot` — moteur de trading, `restart: always`. |
+| `web`       | Dashboard Flask + React buildé, servi par gunicorn (port interne 8501). |
+| `nginx`     | Reverse proxy 80/443, TLS auto-signé + basic auth devant le dashboard. |
+| `scheduler` | [ofelia](https://github.com/mcuadros/ofelia) : scorer hebdo + backup quotidien, via `docker exec` dans les conteneurs existants. |
 
-## Étapes
+La planification est **dans le stack** — plus de cron hôte ni de
+systemd. Le scorer tourne chaque dimanche 18h (`job-exec` dans `bot`),
+le backup `pg_dump` chaque nuit à 2h vers le volume `backups`
+(rétention 30 jours, `job-exec` dans `db`).
 
-**1. Transférer le repo sur le VPS** (depuis ta machine Windows, avec
-Git Bash ou WSL — `scp`/`rsync` n'existent pas nativement dans
-PowerShell) :
+## Prérequis
 
-```bash
-rsync -avz --exclude '.venv' --exclude '__pycache__' \
-    /c/Users/Lucas/Documents/TradingBot/ user@VPS_IP:~/TradingBot/
-```
+- Un hôte Linux (Ubuntu 22.04+ recommandé) avec Docker Engine + le
+  plugin `compose`. Le script `setup_vps.sh` les installe si absents.
+- Un fichier `.env` à la racine du repo : `cp .env.example .env` puis
+  renseigne `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`, un `POSTGRES_PASSWORD`
+  solide et les identifiants `DASHBOARD_USER` / `DASHBOARD_PASSWORD`.
 
-Ou simplement `git clone` ton repo directement sur le VPS si tu l'as
-poussé sur GitHub/GitLab.
-
-**2. Copier le `.env`** (jamais commité dans git) — depuis ta machine :
+## Démarrage rapide (VPS)
 
 ```bash
-scp /c/Users/Lucas/Documents/TradingBot/.env user@VPS_IP:~/TradingBot/.env
-```
+# 1. Récupérer le repo sur l'hôte (git clone ou rsync).
+# 2. Configurer les secrets :
+cp .env.example .env && nano .env
 
-**3. Lancer le script d'installation**, sur le VPS :
-
-```bash
-cd ~/TradingBot
+# 3. Installer Docker + générer les secrets nginx + lancer la stack :
 sudo bash lucas-trading/deploy/scripts/setup_vps.sh
 ```
 
-Il va demander un nom d'utilisateur + mot de passe pour l'accès au
-dashboard (authentification HTTP basique), installer tout, et
-afficher l'URL finale à la fin.
+Puis ouvre `https://<IP_DU_VPS>`. Le certificat étant auto-signé, le
+navigateur affiche un avertissement une fois — clique « Avancé →
+continuer », puis saisis les identifiants du dashboard.
 
-**4. Ouvrir `https://<IP_DU_VPS>`** dans un navigateur. Le certificat
-étant auto-signé, le navigateur affichera un avertissement de
-sécurité une fois — c'est normal, clique sur "Avancé → continuer".
-Renseigne ensuite le nom d'utilisateur / mot de passe créés à l'étape 3.
+## Démarrage manuel (local ou serveur)
+
+```bash
+cp .env.example .env                          # remplir les valeurs
+bash lucas-trading/deploy/docker/init_secrets.sh   # certs + .htpasswd
+docker compose build
+docker compose up -d
+```
+
+Pour peupler la base avec des données de démo (sans faire tourner le
+bot) :
+
+```bash
+docker compose run --rm bot python -m tools.seed_fake_data
+```
 
 ## Opérations courantes
 
 ```bash
-# Statut des services
-systemctl status tradingbot-bot tradingbot-dashboard
+# État et logs
+docker compose ps
+docker compose logs -f bot
+docker compose logs -f web
 
-# Logs en direct
-journalctl -u tradingbot-bot -f
-journalctl -u tradingbot-dashboard -f
-
-# Redémarrer après une mise à jour du code
+# Mise à jour du code
 git pull
-sudo systemctl restart tradingbot-bot tradingbot-dashboard
+docker compose build
+docker compose up -d
 
-# Lancer le scorer manuellement (dry-run)
-cd lucas-trading && ../.venv/bin/python -m live.scorer --dry-run
+# Lancer le scorer à la demande
+docker compose exec bot python -m live.scorer
 
-# Voir les sauvegardes de la base
-ls -lh lucas-trading/backups/
+# Backup manuel de la base
+docker compose exec db sh -c \
+  'pg_dump -U tradingbot tradingbot | gzip > /backups/manual_$(date +%F).sql.gz'
+
+# Ouvrir un psql
+docker compose exec db psql -U tradingbot -d tradingbot
+
+# Voir les sauvegardes
+docker compose exec db ls -lh /backups
 ```
 
 ## Migrer vers un vrai domaine plus tard
 
-Quand tu pointes un nom de domaine vers l'IP du VPS, remplace le
-certificat auto-signé par un vrai certificat Let's Encrypt :
+L'emplacement `/.well-known/acme-challenge/` est déjà câblé dans
+`deploy/docker/nginx.conf` (servi via le volume `certbot-webroot`).
+Quand un domaine pointe vers l'hôte :
 
-```bash
-sudo apt install certbot python3-certbot-nginx
-sudo certbot --nginx -d ton-domaine.com
-```
-
-Certbot réécrit automatiquement la configuration Nginx et gère le
-renouvellement — plus d'avertissement navigateur.
+1. Renseigne le `server_name` réel dans `nginx.conf`.
+2. Ajoute un conteneur `certbot/certbot` (ou lance-le ponctuellement)
+   en mode `--webroot -w /var/www/certbot -d ton-domaine.com`.
+3. Monte les certificats émis à la place des certs auto-signés et
+   recharge nginx (`docker compose exec nginx nginx -s reload`).
 
 ## Limite connue
 
-L'onglet **Configuration** du dashboard permet de modifier
-`config.json` (signaux actifs, seuils, stop-loss) directement depuis
-le navigateur. C'est protégé par le mot de passe Nginx comme le reste
-du dashboard, mais ça reste une opération d'écriture exposée à
-distance — ne partage jamais les identifiants du dashboard.
+L'onglet **Configuration** du dashboard modifie `config.json` (signaux
+actifs, seuils, stop-loss) depuis le navigateur. C'est protégé par le
+mot de passe Nginx, mais ça reste une écriture exposée à distance — ne
+partage jamais les identifiants du dashboard.

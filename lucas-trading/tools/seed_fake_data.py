@@ -1,7 +1,7 @@
 """
 Générateur de données fictives pour tester le dashboard.
 =========================================================
-Insère des barres OHLCV + indicateurs réalistes dans bars.db
+Insère des barres OHLCV + indicateurs réalistes dans PostgreSQL
 pour tous les 30 symboles, sans avoir besoin que le bot tourne.
 
 Usage (depuis lucas-trading/) :
@@ -13,10 +13,12 @@ Usage (depuis lucas-trading/) :
 import argparse
 import math
 import random
-import sqlite3
 from datetime import datetime, timedelta, UTC
 
-from core.constants import CRYPTO_SYMBOLS, DB_FILE
+import psycopg
+
+from core import db
+from core.constants import CRYPTO_SYMBOLS
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -249,49 +251,18 @@ def generate_indicators(
 #  Écriture en base
 # ══════════════════════════════════════════════════════════════════════════════
 
-def init_db(conn: sqlite3.Connection) -> None:
-    """Crée les tables si elles n'existent pas (idempotent)."""
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS bars (
-            symbol    TEXT NOT NULL,
-            timestamp TEXT NOT NULL,
-            open      REAL NOT NULL,
-            high      REAL NOT NULL,
-            low       REAL NOT NULL,
-            close     REAL NOT NULL,
-            volume    REAL NOT NULL,
-            PRIMARY KEY (symbol, timestamp)
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS indicators (
-            symbol     TEXT NOT NULL,
-            timestamp  TEXT NOT NULL,
-            close      REAL,
-            vol_avg    REAL,
-            vol_spike  INTEGER,
-            buy_votes  INTEGER,
-            sell_votes INTEGER,
-            n_signals  INTEGER,
-            signal     TEXT,
-            PRIMARY KEY (symbol, timestamp)
-        )
-    """)
-    conn.commit()
-
-
-def reset_db(conn: sqlite3.Connection) -> None:
+def reset_db(conn: psycopg.Connection) -> None:
     """Supprime toutes les données existantes."""
-    conn.execute("DELETE FROM indicators")
-    conn.execute("DELETE FROM bars")
+    # indicators référence bars → TRUNCATE en cascade sur les deux.
+    conn.execute("TRUNCATE indicators, bars RESTART IDENTITY CASCADE")
     conn.commit()
     print("🗑️  Données existantes effacées.")
 
 
 def seed(n_bars: int, reset: bool) -> None:
     """Point d'entrée principal : génère et insère les données fictives."""
-    conn = sqlite3.connect(DB_FILE)
-    init_db(conn)
+    conn = db.connect()
+    db.init_schema(conn)
 
     if reset:
         reset_db(conn)
@@ -308,19 +279,22 @@ def seed(n_bars: int, reset: bool) -> None:
         bars = generate_bars(symbol, n_bars)
         inds = generate_indicators(bars)
 
-        conn.executemany(
-            "INSERT OR IGNORE INTO bars "
-            "(symbol, timestamp, open, high, low, close, volume) "
-            "VALUES (?,?,?,?,?,?,?)",
-            bars,
-        )
-        conn.executemany(
-            "INSERT OR IGNORE INTO indicators "
-            "(symbol, timestamp, close, vol_avg, vol_spike, "
-            " buy_votes, sell_votes, n_signals, signal) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
-            inds,
-        )
+        with conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO bars "
+                "(symbol, timestamp, open, high, low, close, volume) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s) "
+                "ON CONFLICT (symbol, timestamp) DO NOTHING",
+                bars,
+            )
+            cur.executemany(
+                "INSERT INTO indicators "
+                "(symbol, timestamp, close, vol_avg, vol_spike, "
+                " buy_votes, sell_votes, n_signals, signal) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+                "ON CONFLICT (symbol, timestamp) DO NOTHING",
+                inds,
+            )
         conn.commit()
 
         n_signals = sum(1 for r in inds if r[-1] in ("BUY", "SELL"))
@@ -332,11 +306,16 @@ def seed(n_bars: int, reset: bool) -> None:
         )
 
     # Résumé
-    n_bars_total   = conn.execute("SELECT COUNT(*) FROM bars").fetchone()[0]
-    n_ind_total    = conn.execute("SELECT COUNT(*) FROM indicators").fetchone()[0]
+    n_bars_total = conn.execute(
+        "SELECT COUNT(*) AS n FROM bars"
+    ).fetchone()["n"]
+    n_ind_total = conn.execute(
+        "SELECT COUNT(*) AS n FROM indicators"
+    ).fetchone()["n"]
     n_trades_total = conn.execute(
-        "SELECT COUNT(*) FROM indicators WHERE signal IN ('BUY','SELL')"
-    ).fetchone()[0]
+        "SELECT COUNT(*) AS n FROM indicators "
+        "WHERE signal IN ('BUY','SELL')"
+    ).fetchone()["n"]
     conn.close()
 
     print(
@@ -344,10 +323,10 @@ def seed(n_bars: int, reset: bool) -> None:
         f"   Barres    : {n_bars_total:,}\n"
         f"   Indicateurs : {n_ind_total:,}\n"
         f"   Signaux BUY/SELL : {n_trades_total}\n"
-        f"   DB : {DB_FILE}\n"
+        f"   DB : {db.safe_dsn()}\n"
     )
-    print("Lance maintenant :\n"
-          "   streamlit run live/dashboard.py\n")
+    print("Lance maintenant le dashboard web :\n"
+          "   python -m web.run   (ou via docker compose)\n")
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

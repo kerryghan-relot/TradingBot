@@ -17,9 +17,17 @@ ROOT_DIR: Path = Path(__file__).resolve().parent.parent
 DATA_DIR:    Path = ROOT_DIR / "data"                  # historical CSVs
 OUTPUT_DIR:  Path = ROOT_DIR / "results"               # backtest outputs
 CONFIG_FILE: Path = ROOT_DIR / "config" / "config.json"
-DB_FILE:     Path = ROOT_DIR / "bars.db"               # live bar store
+# Live bar/indicator/trade storage now lives in PostgreSQL — see
+# core/db.py.  Connection settings come from the DATABASE_URL env var.
+
+# Log directory shared between the bot (writer) and the dashboard
+# (reads bot.log to surface recent errors).  A named Docker volume is
+# mounted here so both containers see the same file.
+LOG_DIR:     Path = ROOT_DIR / "logs"
+LOG_FILE:    Path = LOG_DIR / "bot.log"
 
 OUTPUT_DIR.mkdir(exist_ok=True)
+LOG_DIR.mkdir(exist_ok=True)
 
 # ── Symbol universe ───────────────────────────────────────────────────
 SYMBOLS: list[str] = [
