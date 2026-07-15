@@ -106,8 +106,8 @@ Two traps:
 
 ## Conventions
 
-- **Markdown**: do not hard-wrap prose. One paragraph or bullet is one line, however long — editors soft-wrap it. Code blocks and tables are exempt.
-- **Code style**: `.claude/rules/code-style.md` (auto-loaded) — PEP 8 + Google style, 80 cols, `X | None` never `Optional[X]`, built-in generics. It is enforced by review only.
+- **Prose**: `.claude/rules/prose.md` (loaded when touching any `.md` / `.txt`) — do not hard-wrap prose. One paragraph or bullet is one line, however long — editors soft-wrap it. Code blocks, tables and frontmatter are exempt; commit bodies are **not** exempt. There is no column limit on prose.
+- **Code style**: `.claude/rules/code-style.md` (loaded when touching `.py` / `.pyi`) — PEP 8 + Google style, 80 cols, `X | None` never `Optional[X]`, built-in generics. It is enforced by review only.
 - **Commits**: `.claude/rules/commits.md` (auto-loaded) — Conventional Commits, enforced by a commitizen `commit-msg` hook. Scopes are the top-level modules (`core`, `live`, `web`, …) plus `infra`. Never `--no-verify`; `pyproject.toml`'s `version` and `CHANGELOG.md` are owned by release-please, never bumped by hand.
 - **Language**: user-facing docs (`src/README.md`, `deploy/README.md`) are in **French**; code, docstrings and comments are in **English**. Match the file you are in.
 - **`TODO.md` / `DONE.md`** (repo root) are a hand-maintained log. Both the user and Claude write to them: a worked-on TODO bullet moves to `DONE.md`, and `DONE.md` is to be updated after any significant change. **Keep every bullet to 2 sentences at most** — reference a GitHub issue (`TODO.md`) or a commit (`DONE.md`) instead of writing a long description. `DONE.md` entries are grouped newest-first under `## <date> — <title>` headings.

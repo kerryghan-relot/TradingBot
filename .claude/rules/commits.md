@@ -2,11 +2,7 @@
 
 ## Conventional Commits — enforced
 
-commitizen enforces the [Conventional Commits](https://www.conventionalcommits.org/)
-spec via a `commit-msg` hook, installed through the
-[pre-commit](https://pre-commit.com/) framework (`.pre-commit-config.yaml`). The
-structure feeds release-please, which produces `CHANGELOG.md` and bumps the
-`version` in `pyproject.toml` on merges to `main`.
+commitizen enforces the [Conventional Commits](https://www.conventionalcommits.org/) spec via a `commit-msg` hook, installed through the [pre-commit](https://pre-commit.com/) framework (`.pre-commit-config.yaml`). The structure feeds release-please, which produces `CHANGELOG.md` and bumps the `version` in `pyproject.toml` on merges to `main`.
 
 The hook is **not active until it is installed**, once per clone:
 
@@ -28,16 +24,13 @@ ci:       No bump. CI config.
 chore:    No bump. Maintenance.
 ```
 
-Breaking changes: append `!` after the type or include a `BREAKING CHANGE:`
-footer. Triggers a **Major** bump.
+Breaking changes: append `!` after the type or include a `BREAKING CHANGE:` footer. Triggers a **Major** bump.
 
-Scope: optional, lowercase, one of the top-level module names — `core`,
-`backtest`, `live`, `strategies`, `web`, `tools`, `deploy`, `config`, `docs`,
-plus `infra` for the repo-root container/dependency stack (`Dockerfile`,
-`docker-compose.yml`, `uv.lock`).
+Scope: optional, lowercase, one of the top-level module names — `core`, `backtest`, `live`, `strategies`, `web`, `tools`, `deploy`, `config`, `docs`, plus `infra` for the repo-root container/dependency stack (`Dockerfile`, `docker-compose.yml`, `uv.lock`).
 
-Message body: when writing a message body, keep each paragraph under 3 lines.
-Keep the body short.
+Message body: keep it short — 2 or 3 sentences per paragraph, and few paragraphs. The spec is permissive here ("a commit body is free-form and MAY consist of any number of newline separated paragraphs"), so brevity is a project choice, not a rule imposed from outside.
+
+Do **not** hard-wrap the body: one paragraph is one line, exactly as in `prose.md`. Conventional Commits imposes no line-length limit anywhere — the familiar 50/72 columns is git folklore, not part of the spec, and this project does not follow it.
 
 Examples:
 
@@ -49,55 +42,31 @@ chore(infra): pin the postgres base image
 feat(core)!: drop SQLite support from the data layer
 ```
 
-Both the type list and the scope list are validated by the hook — a scope
-outside the list above is rejected, as are the `style`, `revert` and `bump`
-types that commitizen allows by default. The vocabulary lives in
-`[tool.commitizen.customize].schema_pattern` in `pyproject.toml`; edit it there
-and here together. Merge and revert commits are exempt (commitizen skips
-messages starting with `Merge`, `Revert`, `Pull request`, `fixup!`, `squash!`).
+Both the type list and the scope list are validated by the hook — a scope outside the list above is rejected, as are the `style`, `revert` and `bump` types that commitizen allows by default. The vocabulary lives in `[tool.commitizen.customize].schema_pattern` in `pyproject.toml`; edit it there and here together. Merge and revert commits are exempt (commitizen skips messages starting with `Merge`, `Revert`, `Pull request`, `fixup!`, `squash!`).
 
-## Claude asks before committing, and never pushes
+## Claude asks before committing or branching, and never pushes
 
-- **Committing** always requires explicit human confirmation first — never commit
-  because a task felt finished.
-- **Pushing is human-only.** Never run `git push`, in any form, for any reason.
-  Prepare the commits and hand the push back to the user.
+- **Committing** always requires explicit human confirmation first — never commit because a task felt finished.
+- **Branch actions** — creating, deleting, renaming or moving a branch (`git branch`, `git checkout -b`, `git switch -c`) — ask first. Never reshape the branch graph, or move the session onto another branch, unprompted.
+- **Pushing is human-only.** Never run `git push`, in any form, for any reason. Prepare the commits and hand the push back to the user.
 
-`.claude/settings.json` enforces both through the permission system (`ask` on
-`git commit`, `deny` on `git push`, for the Bash and PowerShell tools alike).
-That check matches on the command string, so it cannot see a `git push` reached
-indirectly — inside a shell script, a git alias, or a deploy command. This rule
-is what covers those: the intent is no pushes, not merely no matching strings.
+`.claude/settings.json` enforces these through the permission system (`ask` on `git commit` and the branch verbs, `deny` on `git push`, for the Bash and PowerShell tools alike). That check matches on the command string, so it cannot see a `git push` reached indirectly — inside a shell script, a git alias, or a deploy command. This rule is what covers those: the intent is no pushes and no surprise branches, not merely no matching strings.
 
 ## Hooks — never bypassed
 
-- `commit-msg` runs commitizen. It is the **only** hook: there is no linter and
-  no test suite in this repo, so nothing runs at the `pre-commit` stage.
-- **Never** pass `--no-verify`. If a hook fails, fix the underlying problem and
-  create a new commit. The commit that failed the hook **did not happen** —
-  `git commit --amend` would modify the previous commit. Stage the fix and run
-  `git commit` again.
+- `commit-msg` runs commitizen. It is the **only** hook: there is no linter and no test suite in this repo, so nothing runs at the `pre-commit` stage.
+- **Never** pass `--no-verify`. If a hook fails, fix the underlying problem and create a new commit. The commit that failed the hook **did not happen** — `git commit --amend` would modify the previous commit. Stage the fix and run `git commit` again.
 
 ## Versioning criteria (Major.Minor.Patch)
 
-- **Major:** breaking changes — DB or schema migrations that aren't
-  backward-compatible, removal of a feature, a change to `core/engine.py` or
-  `core/signals.py` that alters signal semantics for every caller, change in
-  app-wide behavior.
+- **Major:** breaking changes — DB or schema migrations that aren't backward-compatible, removal of a feature, a change to `core/engine.py` or `core/signals.py` that alters signal semantics for every caller, change in app-wide behavior.
 - **Minor:** new feature, local scope.
 - **Patch:** bug fix, slight UI tweak, typo, doc update.
 
-release-please handles the bump automatically based on commit types; do not bump
-the `version` in `pyproject.toml` by hand, and do not run `cz bump` — commitizen
-is configured as a message linter only.
+release-please handles the bump automatically based on commit types; do not bump the `version` in `pyproject.toml` by hand, and do not run `cz bump` — commitizen is configured as a message linter only.
 
-The project is pre-1.0 and `bump-minor-pre-major` is **off**
-(`release-please-config.json`), so the first breaking change releases `1.0.0`
-rather than `0.2.0`.
+The project is pre-1.0 and `bump-minor-pre-major` is **off** (`release-please-config.json`), so the first breaking change releases `1.0.0` rather than `0.2.0`.
 
 ## CHANGELOG.md
 
-`CHANGELOG.md` is generated by release-please at the repo root and is committed.
-Do not edit it by hand — it is rewritten from the commit history on every
-release PR. `.release-please-manifest.json` tracks the current released version
-and is also machine-owned.
+`CHANGELOG.md` is generated by release-please at the repo root and is committed. Do not edit it by hand — it is rewritten from the commit history on every release PR. `.release-please-manifest.json` tracks the current released version and is also machine-owned.
