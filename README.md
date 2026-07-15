@@ -8,6 +8,29 @@ Several mean-reversion signals vote on every 1-minute bar; when enough of them a
 - **Deployment and operations**: [`src/deploy/README.md`](src/deploy/README.md)
 - **Signals reference**: [`src/docs/GUIDE_SIGNAUX_METHODES.md`](src/docs/GUIDE_SIGNAUX_METHODES.md)
 
+## Getting started
+
+```bash
+git clone git@github.com:kerryghan-relot/TradingBot.git
+cd TradingBot
+uv sync                            # install dependencies (repo root)
+uv run pre-commit install          # once per clone — see below
+.venv\Scripts\activate.ps1         # PowerShell
+```
+
+`uv sync` installs the `pre-commit` and `commitizen` tools, but it does **not** wire the git hook that runs them: `.git/hooks/` is local to a clone and never travels with the repo. `uv run pre-commit install` is therefore a separate one-time step in every clone, and until someone runs it commit messages are not checked at all. See [`.claude/rules/commits.md`](.claude/rules/commits.md).
+
+Python commands run **from `src/`**, which is where `core/`, `live/` and `web/` resolve as top-level packages. Add dependencies with `uv add <package>`, never `pip install`.
+
+```bash
+# Or run the whole stack in containers (needs a repo-root .env)
+cp .env.example .env
+bash src/deploy/docker/init_secrets.sh
+docker compose up -d --build
+```
+
+Alpaca keys go in `.env` at the repo root. The bot is in paper trading (`PAPER = True` in `core/broker.py`).
+
 ## How it works
 
 A **strategy** is not code — it is a named, frozen configuration of the shared vote engine: which signals vote, their parameters, the vote threshold, the stop-loss. That single config dict drives both `python backtest.py <name>` and `python live.py <name>`.
@@ -97,22 +120,3 @@ Two details that surprise people reading the code for the first time:
 
 - **`config/config.json` is the runtime source of truth**, not the strategy file. `live.py` seeds it from the strategy on first run; after that the file wins, and three different writers touch it (the scorer, the dashboard, and you).
 - **`indicators.timestamp` is the evaluation time, not the bar close time.** It differs from `bars.timestamp` by design, so joining the two tables on timestamp silently returns nothing.
-
-## Setup
-
-```bash
-uv sync                            # install dependencies (repo root)
-.venv\Scripts\activate.ps1         # PowerShell
-uv add <package>                   # add a dependency — never `pip install`
-```
-
-Python commands run **from `src/`**, which is where `core/`, `live/` and `web/` resolve as top-level packages.
-
-```bash
-# Or run the whole stack in containers (needs a repo-root .env)
-cp .env.example .env
-bash src/deploy/docker/init_secrets.sh
-docker compose up -d --build
-```
-
-Alpaca keys go in `.env` at the repo root. The bot is in paper trading (`PAPER = True` in `core/broker.py`).
