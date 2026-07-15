@@ -2,25 +2,155 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Repository layout
+## What this is
 
-- `lucas-trading/` — Lucas's unified trading project: shared engine (`core/`), backtesting (`backtest/`), live execution (`live/`), strategies (`strategies/`) — see its `README.md`
-- `.venv/` — shared virtual environment at the repo root
-- `Dockerfile` / `docker-compose.yml` — full containerised stack (Postgres + bot + web + nginx + scheduler); see `lucas-trading/deploy/README.md`
+A paper-trading bot for US stocks and crypto, executing through Alpaca. It is built on a
+single principle: **a strategy is written once and runs identically in backtest and live**.
+The shared per-bar code path (`core/engine.py`) is the load-bearing piece of the design —
+see *Architecture* below before changing anything under `core/`.
 
-## Data store
+All application code lives in `lucas-trading/`. The repo root holds the shared venv, the
+container stack, and dependency management.
 
-Live bars, indicators and trades are persisted in **PostgreSQL** (not the old SQLite `bars.db`). The access layer is `lucas-trading/core/db.py`; connection settings come from the `DATABASE_URL` env var (defaults to the compose `db` service). Timestamps are stored as ISO-8601 `TEXT`.
+## Commands
 
-## Setup
+Python commands run **from `lucas-trading/`**, not from the repo root: imports resolve
+`core/`, `live/`, `web/` and `strategies/` as top-level packages, and running from the root
+raises `ModuleNotFoundError`. The Dockerfile does the same via `WORKDIR /app/lucas-trading`.
 
 ```bash
-# Local dev (bare metal): install dependencies
-uv sync
-.venv\Scripts\activate.ps1        # PowerShell
-
-# Or run the whole stack in Docker (needs a repo-root .env)
-docker compose up -d --build
+uv sync                              # install deps (repo root)
+..\.venv\Scripts\activate.ps1        # activate, from lucas-trading/ (PowerShell)
+uv add <package>                     # add a dep — never `pip install`
 ```
 
-Add new dependencies with `uv add <package>` rather than `pip install`.
+```bash
+# Backtest / live — <name> is a module in strategies/, e.g. vote_mr
+python backtest.py vote_mr                      # event-driven, all CSVs in data/
+python backtest.py vote_mr --symbols AAPL NVDA  # subset
+python live.py vote_mr                          # live bot (paper)
+python -m live.scorer --dry-run                 # preview weekly ranking
+python -m live.scorer                           # write top-X into config.json
+python -m tools.download_history                # needs TWELVE_DATA_API_KEY in .env
+python -m tools.seed_fake_data                  # populate DB without running the bot
+
+# Vectorized research (fast, approximate — see Architecture)
+python -m backtest.vectorized.backtest_multi
+python -m backtest.vectorized.optimize
+streamlit run backtest/dashboard.py
+
+# Web dashboard
+cd web/frontend && npm install && npm run build && cd ../..
+python -m web.run                    # serves front + API on http://127.0.0.1:8501
+cd web/frontend && npm run dev       # front hot-reload (proxies /api to Flask)
+```
+
+```bash
+# Docker stack — from the repo root
+docker compose up -d --build
+docker compose logs -f bot
+docker compose exec bot python -m live.scorer
+docker compose exec db psql -U tradingbot -d tradingbot
+```
+
+**There is no test suite and no linter configured** — no pytest, no ruff. There is no test
+command to run; don't go looking for one. The `py_compile`-and-smoke-test approach in
+`REFACTOR_PLAN.md` phase 10 is the only verification precedent in the repo. `pre-commit` and
+`commitizen` are installed, but they lint **commit messages only** (see *Conventions*) —
+nothing runs at the `pre-commit` stage.
+
+```bash
+uv run pre-commit install            # once per clone — activates the commit-msg hook
+```
+
+## Architecture
+
+### One strategy, two engines
+
+`core/signals.py` + `core/engine.py` are the single implementation of the per-bar logic, and
+**three** callers share them:
+
+- `live/bot.py` — live orders against Alpaca
+- `live/scorer.py` — weekly symbol ranking by simulated Sharpe
+- `backtest/event_driven.py` → `core/simulation.py` — historical replay
+
+This is the whole point of the layout. Before the merge documented in `REFACTOR_PLAN.md`,
+the signals existed in three hand-maintained copies and silently drifted, so the scorer
+ranked symbols on a strategy that was no longer the one being traded. A change to
+`evaluate_bar` intentionally changes backtest, scorer and live at once — that is the design,
+not a hazard to route around.
+
+`core/engine.py` deliberately owns **no** position tracking, order placement, stop-loss, or
+persistence. Those belong to the callers. Keep it that way.
+
+### Adding signals vs. adding strategies
+
+- **A new strategy** is a config, not code: copy `strategies/vote_mr.py`, override keys over
+  `DEFAULT_CONFIG`, export `STRATEGY`. It is then available to both CLIs by module name.
+- **A new signal type** requires two files: implement `sig_*` in `core/signals.py`, then wire
+  it into `evaluate_bar` in `core/engine.py` (and into `warmup_needed` if it needs history).
+  Stateful signals (VWAP, ORB, KalmanZ) additionally need state fields on `SignalState` and
+  reset handling in `start_bar`.
+
+### Config is the runtime source of truth
+
+`config/config.json` (gitignored) outranks the strategy file once it exists:
+
+- `live.py <name>` creates it from the strategy if absent; if present, it only *reports*
+  divergences and the file wins.
+- The bot **hot-reloads** it (~30 s) — `CryptoBot._reload_config()`.
+- `live/scorer.py` rewrites its `symbols` key every Sunday.
+- The dashboard's Configuration tab writes it over HTTP.
+
+So editing a strategy file does not change a running bot, and three different writers touch
+that one file.
+
+### The vectorized replica can drift
+
+`backtest/vectorized/strategies_vbt.py` re-implements the signals vectorized (vectorbt) for
+speed. It is a *second* implementation and parity with `core/signals.py` was **not**
+re-validated by the refactor (`REFACTOR_PLAN.md` §5). Use the vectorized scripts for
+exploration; final validation of a strategy always goes through `python backtest.py <name>`,
+which is slower but divergence-free by construction.
+
+### Data store
+
+PostgreSQL via `core/db.py`; connection from `DATABASE_URL` (defaults to the compose `db`
+service). Three tables: `bars` (raw OHLCV), `indicators` (per-bar vote snapshot), `trades`
+(one row per accepted order, with realised `pnl_pct` on exits).
+
+Two traps:
+
+- **`indicators.timestamp` is the evaluation time, not the bar close time** — it deliberately
+  differs from `bars.timestamp`. Joining the two on `timestamp` silently returns zero rows.
+  There is intentionally no foreign key.
+- Timestamps are ISO-8601 **`TEXT`**, not `TIMESTAMPTZ` — a deliberate carry-over so that
+  lexicographic order still matches chronological order after the SQLite migration.
+
+### Import-time credential check
+
+`core/broker.py` raises `RuntimeError` at **import** if `ALPACA_API_KEY` / `ALPACA_SECRET_KEY`
+are absent. Anything importing `live.bot` or `live.scorer` therefore needs a populated `.env`.
+The backtest path and `web/` do not import it (the web layer talks to Alpaca over raw
+`requests` instead).
+
+### Single source of truth
+
+`core/constants.py` owns paths, the 30-symbol `SYMBOLS` universe, and the annualisation
+factors. The live/backtest annualisation split matters: research uses **5-min** Twelve Data
+bars, live uses **1-min** Alpaca bars, and Sharpe is wrong if the factors are crossed.
+
+## Conventions
+
+- **Code style**: `.claude/rules/code-style.md` (auto-loaded) — PEP 8 + Google style, 80 cols,
+  `X | None` never `Optional[X]`, built-in generics. It is enforced by review only.
+- **Commits**: `.claude/rules/commits.md` (auto-loaded) — Conventional Commits, enforced by a
+  commitizen `commit-msg` hook. Scopes are the top-level modules (`core`, `live`, `web`, …)
+  plus `infra`. Never `--no-verify`; `pyproject.toml`'s `version` and `CHANGELOG.md` are owned
+  by release-please, never bumped by hand.
+- **Language**: user-facing docs (`lucas-trading/README.md`, `deploy/README.md`) are in
+  **French**; code, docstrings and comments are in **English**. Match the file you are in.
+- **`TODO.md` / `DONE.md`** (repo root) are a hand-maintained log. Both the user and Claude
+  write to them: a worked-on TODO bullet moves to `DONE.md`, and `DONE.md` is to be updated
+  after any significant change.
+- `archive/` holds superseded files kept for verification — do not treat it as live code.

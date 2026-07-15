@@ -4,6 +4,11 @@ Projet unifié : recherche, backtesting et exécution live partagent le
 même moteur de signaux. Une stratégie s'écrit **une seule fois** et
 tourne à l'identique en backtest et en live.
 
+Ce fichier décrit le **workflow** (créer → backtester → passer live).
+Pour la vue d'ensemble, la stack technique et l'architecture, voir le
+[README racine](../README.md) ; pour l'exploitation, voir
+[deploy/README.md](deploy/README.md).
+
 ## Structure
 
 ```
