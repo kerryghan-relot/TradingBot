@@ -56,6 +56,19 @@ types that commitizen allows by default. The vocabulary lives in
 and here together. Merge and revert commits are exempt (commitizen skips
 messages starting with `Merge`, `Revert`, `Pull request`, `fixup!`, `squash!`).
 
+## Claude asks before committing, and never pushes
+
+- **Committing** always requires explicit human confirmation first — never commit
+  because a task felt finished.
+- **Pushing is human-only.** Never run `git push`, in any form, for any reason.
+  Prepare the commits and hand the push back to the user.
+
+`.claude/settings.json` enforces both through the permission system (`ask` on
+`git commit`, `deny` on `git push`, for the Bash and PowerShell tools alike).
+That check matches on the command string, so it cannot see a `git push` reached
+indirectly — inside a shell script, a git alias, or a deploy command. This rule
+is what covers those: the intent is no pushes, not merely no matching strings.
+
 ## Hooks — never bypassed
 
 - `commit-msg` runs commitizen. It is the **only** hook: there is no linter and

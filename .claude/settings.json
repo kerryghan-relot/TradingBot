@@ -9,6 +9,18 @@
       "WebFetch(domain:readthedocs.io)",
       "WebFetch(domain:github.io)",
       "WebFetch(domain:python.org)"
+    ],
+    "ask": [
+      "Bash(git commit)",
+      "Bash(git commit:*)",
+      "PowerShell(git commit)",
+      "PowerShell(git commit:*)"
+    ],
+    "deny": [
+      "Bash(git push)",
+      "Bash(git push:*)",
+      "PowerShell(git push)",
+      "PowerShell(git push:*)"
     ]
   }
 }
