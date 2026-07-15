@@ -1,0 +1,12 @@
+# Commit message linting. See .claude/rules/commits.md.
+#
+# One-time setup per clone (the hook is not active until this is run):
+#   uv run pre-commit install
+default_install_hook_types: [commit-msg]
+
+repos:
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v4.16.4
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]

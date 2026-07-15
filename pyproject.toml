@@ -24,3 +24,19 @@ dependencies = [
     "psycopg[binary]>=3.3.4",
     "gunicorn>=26.0.0",
 ]
+
+[dependency-groups]
+dev = [
+    "commitizen>=4.16.4",
+    "pre-commit>=4.6.0",
+]
+
+# Commit message linting only. Versioning and CHANGELOG.md are owned by
+# release-please (.github/workflows/release-please.yml) — never run `cz bump`.
+# The rule this enforces is documented in .claude/rules/commits.md.
+[tool.commitizen]
+name = "cz_customize"
+
+[tool.commitizen.customize]
+schema = "<type>(<scope>)!: <subject>"
+schema_pattern = "(?s)(build|chore|ci|docs|feat|fix|perf|refactor|test)(\\((core|backtest|live|strategies|web|tools|deploy|config|docs|infra)\\))?!?: ([^\\n\\r]+)((\\n\\n.*)|(\\s*))?$"

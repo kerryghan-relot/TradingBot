@@ -9,6 +9,34 @@
       "WebFetch(domain:readthedocs.io)",
       "WebFetch(domain:github.io)",
       "WebFetch(domain:python.org)"
+    ],
+    "ask": [
+      "Bash(git commit)",
+      "Bash(git commit:*)",
+      "PowerShell(git commit)",
+      "PowerShell(git commit:*)",
+      "Bash(git branch)",
+      "Bash(git branch:*)",
+      "Bash(git checkout -b:*)",
+      "Bash(git checkout -B:*)",
+      "Bash(git switch -c:*)",
+      "Bash(git switch -C:*)",
+      "Bash(git switch --create:*)",
+      "Bash(git worktree add:*)",
+      "PowerShell(git branch)",
+      "PowerShell(git branch:*)",
+      "PowerShell(git checkout -b:*)",
+      "PowerShell(git checkout -B:*)",
+      "PowerShell(git switch -c:*)",
+      "PowerShell(git switch -C:*)",
+      "PowerShell(git switch --create:*)",
+      "PowerShell(git worktree add:*)"
+    ],
+    "deny": [
+      "Bash(git push)",
+      "Bash(git push:*)",
+      "PowerShell(git push)",
+      "PowerShell(git push:*)"
     ]
   }
 }

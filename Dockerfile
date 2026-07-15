@@ -1,16 +1,16 @@
 # syntax=docker/dockerfile:1
 #
-# Multi-stage build for lucas-trading.
+# Multi-stage build for TradingBot.
 # One image serves the bot, the web dashboard and the scorer — only the
 # command differs (see docker-compose.yml).
 
 # ── Stage 1: build the React front (Vite) ─────────────────────────────
 FROM node:20-alpine AS frontend
 WORKDIR /front
-COPY lucas-trading/web/frontend/package.json \
-     lucas-trading/web/frontend/package-lock.json ./
+COPY src/web/frontend/package.json \
+     src/web/frontend/package-lock.json ./
 RUN npm ci
-COPY lucas-trading/web/frontend/ ./
+COPY src/web/frontend/ ./
 RUN npm run build
 
 
@@ -29,17 +29,19 @@ ENV UV_PROJECT_ENVIRONMENT=/app/.venv \
 WORKDIR /app
 
 # Dependency layer — cached until the lockfile changes.
+# --no-dev: the dev group is commit tooling (commitizen, pre-commit) and uv
+# would otherwise install it here — no commits are ever authored in the image.
 COPY pyproject.toml uv.lock .python-version ./
-RUN uv sync --frozen --no-install-project
+RUN uv sync --frozen --no-install-project --no-dev
 
 # Application code.
-COPY lucas-trading/ ./lucas-trading/
+COPY src/ ./src/
 
 # Built front from stage 1.
-COPY --from=frontend /front/dist ./lucas-trading/web/frontend/dist
+COPY --from=frontend /front/dist ./src/web/frontend/dist
 
 # Imports resolve as top-level packages (core/, live/, web/) from here.
-WORKDIR /app/lucas-trading
+WORKDIR /app/src
 
 # Default command; overridden per-service in docker-compose.yml.
 CMD ["python", "-m", "live.bot"]

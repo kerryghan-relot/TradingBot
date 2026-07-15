@@ -3,14 +3,26 @@
   "evals": [
     {
       "id": 0,
-      "prompt": "Can you analyze my trading database and give me a full report on how the bot has been performing? I want to see the regime breakdown, signal counts, and recent trades for both BTC and ETH.",
-      "expected_output": "A structured per-symbol report covering data coverage, regime distribution table, signal breakdown table, volume spike rate, last 5 BUY/SELL signals table, and last-24h breakdown. Followed by a summary paragraph.",
+      "prompt": "Can you analyze my trading database and give me a full report on how the bot has been performing? I want to see the signal counts, the trades and how much money it's actually made.",
+      "expected_output": "A structured per-symbol report over the symbols actually present in the `bars` table (not a hard-coded list), each covering data coverage, vote/signal breakdown, trades with realised pnl_pct and win rate, volume spike rate, recent activity, and a last-24h window. Leads with the P&L headline and closes with a summary paragraph. Queries PostgreSQL via `docker compose exec db psql` from the repo root.",
       "files": []
     },
     {
       "id": 1,
-      "prompt": "How many buy and sell signals has my bot generated? And what percentage of time is it in RANGING vs TRENDING mode?",
-      "expected_output": "Signal counts (BUY/SELL/HOLD) and regime distribution (RANGING vs TRENDING with percentages) for each symbol. Should handle empty DB gracefully if no data exists.",
+      "prompt": "How many buy and sell signals has my bot generated, and what's my win rate?",
+      "expected_output": "Signal counts (BUY/SELL/HOLD) from `indicators` and win rate computed from `trades.pnl_pct` (wins / closed trades), per symbol. Should handle an unreachable database or an empty table gracefully with a plain-language explanation rather than a traceback.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "What's the regime breakdown — how much time is the bot in RANGING vs TRENDING?",
+      "expected_output": "Should NOT invent a regime column or attempt to query one. Must explain that the vote engine does not track or persist regimes — the `indicators` table stores vote counts, not per-indicator values — and that regime filtering exists only in the research script backtest/vectorized/backtest_v2_regime_mr.py, whose output is not stored in the database. May offer the vote breakdown as the closest available answer.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Show me the bars alongside their indicator values for BTC.",
+      "expected_output": "Must not JOIN bars to indicators on timestamp (indicators.timestamp is the evaluation time, bars.timestamp is the bar close time — the join returns zero rows). Should query the two tables separately and explain why they cannot be joined on timestamp.",
       "files": []
     }
   ]
