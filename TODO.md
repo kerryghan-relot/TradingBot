@@ -1,11 +1,11 @@
-# ToDo
+# TODO
 
-This file list all features, ideas, point of improvement that could be added to the project. This file may be written both by the user and claude code.
-Once a bullet point has been worked on, it must be moved into @DONE.md
-Each individual point must be written in a concise manner. No more than 2 sentences. Longer description must not be needed, the description can eventually reference a GitHub issue to give the full context.
+This file lists features, ideas, and improvement points that could be added to the project. It may be edited by both the user and Claude Code.
+Once a bullet point has been completed, move it to DONE.md.
+Each point must be concise (max 2 sentences); link a GitHub issue for full context when needed.
 
 - [ ] add architect agent
-- [ ] add 2FA (with topt code)
+- [ ] add 2FA (with TOTP codes)
 
 ## Correctness / risk
 

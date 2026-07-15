@@ -1,7 +1,7 @@
 # Done
 
-Here is a list and a short explanation that everything that has been done so far in the project. This file must be updated after every addition, or significant changes to the project.
-Each individual point must be written in a concise manner. No more than 2 sentences. Longer description must not be needed, the description can eventually reference a commit to give the full context.
+This file lists completed work and briefly explains what changed. Update it after every addition or significant change to the project.
+Each point must be concise (max 2 sentences); link a commit for full context when needed.
 
 ## 2026-07-15 — Renommage `lucas-trading/` → `src/`
 
