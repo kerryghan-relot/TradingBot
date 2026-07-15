@@ -1,0 +1,31 @@
+# Opens a release PR on every push to main: bumps `version` in pyproject.toml and
+# regenerates CHANGELOG.md from the commit history. See .claude/rules/commits.md.
+#
+# This uses the default GITHUB_TOKEN, which on a personal-account repo cannot open
+# a PR until this is ticked once, in the browser:
+#   Settings -> Actions -> General -> Workflow permissions
+#     [x] Allow GitHub Actions to create and approve pull requests
+# Without it the job fails with "GitHub Actions is not permitted to create or
+# approve pull requests". The alternative is a PAT in `token:` below, which is not
+# subject to that restriction -- worth switching to if this repo ever grows CI that
+# must run on release PRs, since GITHUB_TOKEN-created PRs do not trigger workflows.
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+# issues: write is needed for the "autorelease:" labels put on the release PR.
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
