@@ -1,10 +1,15 @@
 # Plan de fusion `lucas-research` + `lucas-live-trading`
 
+> **Document historique.** Il décrit la fusion telle qu'elle a été décidée
+> et exécutée le 2026-07-06 et conserve les noms de l'époque. Le dossier
+> `lucas-trading/` a depuis été renommé `src/` (convention classique) —
+> voir le [README racine](README.md) pour l'état actuel.
+
 Branche de travail : `refactor/fusion-research-live`.
 Statut : **exécuté** (plan validé par Lucas le 2026-07-06).
 Décisions retenues : dossier `lucas-trading/`, `strategies_ml.py`
 conservé dans `backtest/vectorized/`, dashboards non fusionnés.
-Voir `lucas-trading/README.md` pour le résultat final.
+Voir `src/README.md` pour le résultat final.
 
 ---
 

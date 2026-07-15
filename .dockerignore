@@ -5,16 +5,16 @@
 
 # Node / frontend build artefacts (rebuilt inside the image)
 **/node_modules/
-lucas-trading/web/frontend/dist/
+src/web/frontend/dist/
 
 # Legacy SQLite store & backups
-lucas-trading/bars.db
-lucas-trading/bars.db-*
-lucas-trading/backups/
+src/bars.db
+src/bars.db-*
+src/backups/
 
 # Runtime data we never want baked into the image
-lucas-trading/logs/
-lucas-trading/results/
+src/logs/
+src/results/
 **/*.log
 
 # VCS & local tooling
@@ -26,4 +26,4 @@ lucas-trading/results/
 
 # Docs / planning
 *.md
-!lucas-trading/README.md
+!src/README.md

@@ -6,7 +6,7 @@
             "runtimeExecutable": "bash",
             "runtimeArgs": [
                 "-lc",
-                "cd lucas-trading && exec ../.venv/bin/python -m web.run --port 8501"
+                "cd src && exec ../.venv/bin/python -m web.run --port 8501"
             ],
             "port": 8501,
             "autoPort": false
