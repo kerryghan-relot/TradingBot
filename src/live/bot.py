@@ -89,9 +89,9 @@ def setup_logging() -> logging.Logger:
       (5 MB per file, 3 rotating backups)
 
     Returns:
-        logging.Logger: Logger named ``"lucasbot"``.
+        logging.Logger: Logger named ``"bot"``.
     """
-    log = logging.getLogger("lucasbot")
+    log = logging.getLogger("bot")
     log.setLevel(logging.DEBUG)
 
     console = logging.StreamHandler()
