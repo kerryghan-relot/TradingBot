@@ -29,8 +29,10 @@ ENV UV_PROJECT_ENVIRONMENT=/app/.venv \
 WORKDIR /app
 
 # Dependency layer — cached until the lockfile changes.
+# --no-dev: the dev group is commit tooling (commitizen, pre-commit) and uv
+# would otherwise install it here — no commits are ever authored in the image.
 COPY pyproject.toml uv.lock .python-version ./
-RUN uv sync --frozen --no-install-project
+RUN uv sync --frozen --no-install-project --no-dev
 
 # Application code.
 COPY lucas-trading/ ./lucas-trading/
