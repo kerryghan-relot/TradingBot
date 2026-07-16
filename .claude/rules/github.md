@@ -40,6 +40,6 @@ The eight help topics (`accessibility`, `actions`, `environment`, `exit-codes`, 
 
 `gh secret` and `gh ssh-key` are **denied** outright — they manage credentials, and `deny` outranks `ask`, so even their read forms are a hard no rather than a prompt.
 
-Everything else prompts by default, deliberately — `gh issue create`, `gh issue edit`, `gh issue close`, `gh pr create`, `gh pr merge`, and the writing `gh workflow` verbs (`run`, `enable`, `disable`).
+The write verbs are in `ask`, so they prompt every time — `gh issue create` / `edit` / `close` / `reopen` / `delete`, `gh pr create` / `merge` / `close` / `edit`, `gh release create` / `delete`. Creating an issue or PR is never a silent side effect of some larger task; it stops for confirmation like a commit does. The writing `gh workflow` verbs (`run`, `enable`, `disable`) are not listed and prompt by default.
 
 `gh api` is **never** allowlisted. It defaults to GET, but `--method POST` turns it into a write against any endpoint, and a prefix-matched permission rule cannot see a flag that far down the command. The same reasoning covers the whole family: the permission system matches command strings, so it cannot see a write reached indirectly. That is what these rules are for.

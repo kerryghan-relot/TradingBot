@@ -3,6 +3,14 @@
 This file lists completed work and briefly explains what changed. Update it after every addition or significant change to the project.
 Each point must be concise (max 2 sentences); link a commit for full context when needed.
 
+## 2026-07-16 — Agents sécurité (`security-analyst` + `security-fixer`) et permissions `gh` en écriture
+
+- **`.claude/agents/security-analyst.md`** (nouveau, premier agent du dépôt) — relecture sécurité sous opus, **lecture seule** (pas d'outil `Edit`) : il lance `/security-review`, applique le skill `security-checklist` et écrit un rapport dans `security-reports/`. Il ne touche jamais au code.
+- **`.claude/agents/security-fixer.md`** (nouveau) — applique les correctifs d'un rapport **déjà approuvé** par l'utilisateur, un point à la fois, sans élargir le périmètre. Ne commit ni ne push. La confirmation entre les deux se fait dans la conversation principale, car un sous-agent n'a pas `AskUserQuestion`.
+- **`.claude/skills/security-checklist/`** (nouveau) — les points sensibles du dépôt : `.env` / clés Alpaca, l'écriture distante `/api/config`, le check crédentiel à l'import, TLS auto-signé + basic-auth, et la construction SQL dans `core/db.py`. Complète `/security-review` (scanner générique) sans le dupliquer.
+- **`security-reports/`** — versionné (historique partagé), mais le dépôt est **public** : aucun exploit ni secret dans un rapport, une faille sévère non publique passe par un GitHub Security Advisory privé.
+- **`.claude/settings.json`** — les verbes `gh` en écriture (`issue create` / `edit` / `close` / `delete`, `pr create` / `merge` / `close`, `release create` / `delete`) passent en `ask` : créer une issue ou une PR demande désormais confirmation.
+
 ## 2026-07-16 — Accès GitHub (`gh`) et règles de workflow
 
 - **GitHub CLI installé** (`gh` 2.96.0, via winget) et authentifié en OAuth : le jeton vit dans le trousseau Windows plutôt que dans un fichier du dépôt. Claude peut désormais lire et créer des issues.
