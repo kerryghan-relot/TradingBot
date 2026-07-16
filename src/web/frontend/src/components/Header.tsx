@@ -18,8 +18,8 @@ export function Header({
   universeLabel: string;
   bot: { state: BotState; label: string };
   clock: string;
-  route: "dashboard" | "config";
-  onRoute: (r: "dashboard" | "config") => void;
+  route: "dashboard" | "hunter" | "config";
+  onRoute: (r: "dashboard" | "hunter" | "config") => void;
 }) {
   const color = STATE_COLOR[bot.state];
   return (
@@ -62,7 +62,7 @@ export function Header({
 
       <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
         <nav style={{ display: "flex", gap: 4 }}>
-          {(["dashboard", "config"] as const).map((r) => (
+          {(["dashboard", "hunter", "config"] as const).map((r) => (
             <button
               key={r}
               onClick={() => onRoute(r)}
@@ -77,7 +77,11 @@ export function Header({
                 color: route === r ? T.text : T.text2,
               }}
             >
-              {r === "dashboard" ? "Tableau de bord" : "Configuration"}
+              {r === "dashboard"
+                ? "Tableau de bord"
+                : r === "hunter"
+                  ? "Opportunités"
+                  : "Configuration"}
             </button>
           ))}
         </nav>

@@ -11,7 +11,14 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from web.server import assemble, data, demo, strategies
+from web.server import (
+    agents,
+    assemble,
+    data,
+    demo,
+    opportunities,
+    strategies,
+)
 
 try:
     from dotenv import load_dotenv
@@ -100,6 +107,25 @@ def create_app() -> Flask:
             return jsonify({"ok": False, "error": str(exc)}), 400
         return jsonify({"ok": True, "config": cfg})
 
+    @app.get("/api/agents")
+    def api_agents() -> object:
+        """Return the pipeline-stage payload (real or demo)."""
+        if use_real_data():
+            return jsonify(agents.agents_payload())
+        return jsonify(demo.agents())
+
+    @app.get("/api/opportunities")
+    def api_opportunities() -> object:
+        """Return the ranked risky/high-upside stock scan (real or demo)."""
+        if use_real_data():
+            payload = opportunities.opportunities_payload()
+            # Fall back to demo when the live scan yields nothing (e.g.
+            # screener/data entitlements missing) so the page is never
+            # blank.
+            if payload.get("items"):
+                return jsonify(payload)
+        return jsonify(demo.opportunities())
+
     @app.get("/api/health")
     def api_health() -> object:
         """Return a small status summary for diagnostics."""
@@ -126,5 +152,13 @@ def create_app() -> Flask:
         if path and target.is_file():
             return send_from_directory(DIST_DIR, path)
         return send_from_directory(DIST_DIR, "index.html")
+
+    # Warm the DB-connectivity probe once at startup: when the database
+    # is unreachable the first probe blocks on a connect/DNS timeout, so
+    # priming the cache here keeps that cost off the first user request.
+    try:
+        data.db_available()
+    except Exception:
+        pass
 
     return app

@@ -122,3 +122,62 @@ export interface ConfigPayload {
   editable: string[];
   demo: boolean;
 }
+
+export type AgentStatus = "ok" | "run" | "wait" | "err" | "planned";
+
+export interface AgentAction {
+  t: string;
+  x: string;
+  s: AgentStatus;
+}
+
+export interface Agent {
+  id: string;
+  name: string;
+  role: string;
+  glyph: string;
+  color: string;
+  status: AgentStatus;
+  last: string;
+  inputs: string[];
+  outputs: string[];
+  actions: AgentAction[];
+}
+
+export interface AgentsPayload {
+  demo: boolean;
+  agents: Agent[];
+}
+
+export type OppSource = "mover" | "active" | "watchlist";
+
+export interface OppFactors {
+  momentum: number;
+  volSurge: number;
+  breakout: number;
+  atrPct: number;
+  dollarVol: number;
+  gapPct: number;
+  news: number;
+}
+
+export interface Opportunity {
+  sym: string;
+  name: string;
+  source: OppSource;
+  price: number;
+  dayChangePct: number;
+  reward: number;
+  risk: number;
+  factors: OppFactors;
+  why: string[];
+  spark: number[];
+}
+
+export interface OpportunitiesPayload {
+  demo: boolean;
+  generatedAt: string;
+  count?: number;
+  guardrails: { minPrice: number; minDollarVol: number };
+  items: Opportunity[];
+}
