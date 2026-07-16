@@ -2224,7 +2224,7 @@ wheels = [
 
 [[package]]
 name = "tradingbot"
-version = "0.1.0"
+version = "0.1.1"
 source = { virtual = "." }
 dependencies = [
     { name = "alpaca-py" },
