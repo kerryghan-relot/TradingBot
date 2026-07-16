@@ -5,7 +5,8 @@ Once a bullet point has been completed, move it to DONE.md.
 Each point must be concise (max 2 sentences); link a GitHub issue for full context when needed.
 
 - [ ] add architect agent
-- [ ] add 2FA (with TOTP codes)
+- [ ] add 2FA (with TOTP codes) — [#4](https://github.com/kerryghan-relot/TradingBot/issues/4)
+- [ ] per-user config and per-user Alpaca keys (multi-tenant) — [#6](https://github.com/kerryghan-relot/TradingBot/issues/6), blocked by #4
 
 ## Correctness / risk
 
@@ -41,4 +42,4 @@ Each point must be concise (max 2 sentences); link a GitHub issue for full conte
 - [ ] **Stale copy referencing the old SQLite store**: the demo banner claims "aucune base `bars.db`" when the check is actually PostgreSQL. `backtest/dashboard.py` also says 5 pages when `PAGES` has 9, and points at `python backtest_multi.py`.
 - [ ] **Benchmarks only exist in demo mode** — `assemble.history()` always returns `bench: None`, so the S&P/Nasdaq/MSCI selector is inert on real data.
 - [ ] **`active_strategy_id()` is a heuristic** that picks whichever strategy shares the most values with `config.json`. A hand-edited config can report a strategy never selected.
-- [ ] **Self-signed TLS + shared basic-auth** on a dashboard that can write `config.json` remotely (flagged in `deploy/README.md`). The 2FA item above is the mitigation.
+- [ ] **Self-signed TLS + shared basic-auth** on a dashboard that can write `config.json` remotely (flagged in `deploy/README.md`). 2FA ([#4](https://github.com/kerryghan-relot/TradingBot/issues/4)) only mitigates the shared-password half; the self-signed TLS is a separate fix ([#5](https://github.com/kerryghan-relot/TradingBot/issues/5)), since a session cookie stolen over a MITM'd connection defeats 2FA.

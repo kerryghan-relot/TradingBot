@@ -47,10 +47,12 @@ Both the type list and the scope list are validated by the hook — a scope outs
 ## Claude asks before committing or branching, and never pushes
 
 - **Committing** always requires explicit human confirmation first — never commit because a task felt finished.
-- **Branch actions** — creating, deleting, renaming or moving a branch (`git branch`, `git checkout -b`, `git switch -c`) — ask first. Never reshape the branch graph, or move the session onto another branch, unprompted.
+- **Branch actions** — creating, deleting, renaming or moving a branch (`git branch`, `git checkout -b`, `git switch -c`, `gh issue develop`) — ask first. Never reshape the branch graph, or move the session onto another branch, unprompted.
 - **Pushing is human-only.** Never run `git push`, in any form, for any reason. Prepare the commits and hand the push back to the user.
 
-`.claude/settings.json` enforces these through the permission system (`ask` on `git commit` and the branch verbs, `deny` on `git push`, for the Bash and PowerShell tools alike). That check matches on the command string, so it cannot see a `git push` reached indirectly — inside a shell script, a git alias, or a deploy command. This rule is what covers those: the intent is no pushes and no surprise branches, not merely no matching strings.
+`gh issue develop` is the sanctioned way to *create* a branch — it links the branch to its issue, and `github.md` owns the naming. It still asks first: it writes a ref to `origin`, so it is a branch action like any other. Choosing it over `git checkout -b` is not a waiver of the prompt.
+
+`.claude/settings.json` enforces these through the permission system (`ask` on `git commit`, the branch verbs and `gh issue develop`, `deny` on `git push`, for the Bash and PowerShell tools alike). That check matches on the command string, so it cannot see a `git push` reached indirectly — inside a shell script, a git alias, or a deploy command. This rule is what covers those: the intent is no pushes and no surprise branches, not merely no matching strings.
 
 ## Hooks — never bypassed
 

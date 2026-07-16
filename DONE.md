@@ -3,6 +3,14 @@
 This file lists completed work and briefly explains what changed. Update it after every addition or significant change to the project.
 Each point must be concise (max 2 sentences); link a commit for full context when needed.
 
+## 2026-07-16 — Accès GitHub (`gh`) et règles de workflow
+
+- **GitHub CLI installé** (`gh` 2.96.0, via winget) et authentifié en OAuth : le jeton vit dans le trousseau Windows plutôt que dans un fichier du dépôt. Claude peut désormais lire et créer des issues.
+- **`.claude/settings.json`** — les sous-commandes `gh` en lecture seule (`auth status`, `issue list` / `view`, `label list`, `pr list` / `view` / `diff`) passent en `allow`, et `gh issue develop` en `ask`. `gh api` reste volontairement hors liste : `--method` en fait une écriture que le filtrage par préfixe ne peut pas voir.
+- **`.claude/rules/github.md`** (nouveau) — lire les commentaires d'une issue avant de travailler dessus, interviewer l'utilisateur plutôt que deviner, et créer les branches via `gh issue develop --name <login>/<numéro>-<slug>`. `git checkout -b` ne relie pas la branche à son issue et ne la referme donc pas à la fusion.
+- **`commits.md`** — `gh issue develop` ajouté aux actions de branche : voie sanctionnée pour créer une branche, mais elle écrit une ref sur `origin` et demande donc confirmation comme les autres.
+- **Issues ouvertes** : #4 (authentification + 2FA TOTP), #5 (vrai TLS via Certbot) et #6 (config par utilisateur, multi-tenant), #6 étant bloquée par #4.
+
 ## 2026-07-15 — Renommage `lucas-trading/` → `src/`
 
 - **Dossier renommé** en `src/` via `git mv`, pour suivre la convention classique et abandonner le nommage personnel. Aucun import ne change : les paquets (`core`, `live`, `web`, …) restent de premier niveau à l'intérieur du dossier.
