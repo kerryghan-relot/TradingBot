@@ -3,6 +3,15 @@
 This file lists completed work and briefly explains what changed. Update it after every addition or significant change to the project.
 Each point must be concise (max 2 sentences); link a commit for full context when needed.
 
+## 2026-07-17 — Agents `software-architect` + `nemesis` (boucle de conception adverse)
+
+- **`.claude/agents/software-architect.md`** (nouveau) — architecte senior sous opus, **agnostique du langage** : il raisonne sur les frontières, les invariants et le coût de migration, pas sur les idiomes Python. Il rédige un brouillon dans `docs/.architecture-design/` et n'implémente pas (pas d'outil `Edit`).
+- **`.claude/agents/nemesis.md`** (nouveau) — relecteur adverse sous sonnet, **générique** : on lui donne le chemin d'un document (conception, plan, migration) et il en attaque le raisonnement. Toute objection doit décrire une défaillance concrète ; s'il ne trouve rien, il le dit plutôt que de meubler.
+- **L'arbitrage reste dans la conversation principale** — l'architecte ne juge pas la critique de son propre travail, et un agent superviseur a été écarté puisque le fil principal tient déjà ce rôle. Un aller-retour maximum, puis la décision remonte à l'utilisateur.
+- **Réservé aux décisions coûteuses à annuler** : une question d'architecture courante se répond directement, sans payer deux démarrages à froid.
+- **`docs/.architecture-design/`** — seul le `README.md` est versionné (`docs/.architecture-design/*` puis exception `!` ; le `/` final aurait empêché git de descendre dans le dossier). Les brouillons sont écrits pour être détruits ; une conception retenue est promue vers l'issue, `CLAUDE.md` ou le code.
+- **Testé deux fois sur #6** (modèle d'exécution multi-tenant, travail jeté) : nemesis a trouvé une prémisse fausse dans le rejet du process-par-utilisateur — un montage `:ro` de `docker.sock` n'empêche pas les écritures, et ofelia fait déjà `job-exec` à travers lui (`docker-compose.yml:34,57,103`).
+
 ## 2026-07-16 — Agents sécurité (`security-analyst` + `security-fixer`) et permissions `gh` en écriture
 
 - **`.claude/agents/security-analyst.md`** (nouveau, premier agent du dépôt) — relecture sécurité sous opus, **lecture seule** (pas d'outil `Edit`) : il lance `/security-review`, applique le skill `security-checklist` et écrit un rapport dans `security-reports/`. Il ne touche jamais au code.

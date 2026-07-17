@@ -14,6 +14,13 @@ src/scorer_task.log
 src/deploy/docker/certs/
 src/deploy/docker/.htpasswd
 
+# Architecture design drafts (software-architect / nemesis working documents).
+# The directory and its README are tracked; every draft inside it is not.
+# Must be `/*` and not `/` — an excluded directory is never descended into, so
+# the `!` exception below would never be reached.
+docs/.architecture-design/*
+!docs/.architecture-design/README.md
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

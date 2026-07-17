@@ -4,7 +4,8 @@ This file lists features, ideas, and improvement points that could be added to t
 Once a bullet point has been completed, move it to DONE.md.
 Each point must be concise (max 2 sentences); link a GitHub issue for full context when needed.
 
-- [ ] add architect agent
+- [ ] add code developer agent [#3]
+- [ ] add code analyst and reviewer agent [#3]
 - [ ] add 2FA (with TOTP codes) — [#4](https://github.com/kerryghan-relot/TradingBot/issues/4)
 - [ ] per-user config and per-user Alpaca keys (multi-tenant) — [#6](https://github.com/kerryghan-relot/TradingBot/issues/6), blocked by #4
 
