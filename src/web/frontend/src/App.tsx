@@ -2,16 +2,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { T } from "./theme";
 import { tabButtonStyle } from "./ui";
 import {
+  fetchAgents,
   fetchHistory,
   fetchLive,
+  fetchOpportunities,
   fetchStrategies,
   selectStrategy,
 } from "./api";
 import type {
+  AgentsPayload,
   Bench,
   HistoryPayload,
   JournalCat,
   LivePayload,
+  OpportunitiesPayload,
   Period,
   StrategiesPayload,
 } from "./types";
@@ -23,17 +27,24 @@ import { LiveView } from "./components/LiveView";
 import { HistoryView } from "./components/HistoryView";
 import { Analysis } from "./components/Analysis";
 import { ConfigPage } from "./components/ConfigPage";
+import { AgentsView } from "./components/AgentsView";
+import { HunterView } from "./components/HunterView";
 
 const LIVE_POLL_MS = 2500;
+const AGENTS_POLL_MS = 5000;
 
 export function App() {
-  const [route, setRoute] = useState<"dashboard" | "config">("dashboard");
+  const [route, setRoute] = useState<"dashboard" | "hunter" | "config">(
+    "dashboard",
+  );
   const [strategies, setStrategies] = useState<StrategiesPayload | null>(null);
   const [selected, setSelected] = useState<string>("");
   const [live, setLive] = useState<LivePayload | null>(null);
   const [history, setHistory] = useState<HistoryPayload | null>(null);
+  const [agents, setAgents] = useState<AgentsPayload | null>(null);
+  const [opps, setOpps] = useState<OpportunitiesPayload | null>(null);
 
-  const [tab, setTab] = useState<"live" | "hist">("live");
+  const [tab, setTab] = useState<"live" | "hist" | "agents">("live");
   const [period, setPeriod] = useState<Period>("all");
   const [bench, setBench] = useState<Bench>("none");
   const [jcat, setJcat] = useState<JournalCat>("Tous");
@@ -75,6 +86,30 @@ export function App() {
       .catch(() => {});
   }, [selected, period, bench]);
 
+  // Poll the pipeline status only while the Agents tab is on screen: the
+  // tab stays selected when the user leaves the dashboard, so the route
+  // has to be checked too.
+  useEffect(() => {
+    if (route !== "dashboard" || tab !== "agents") return;
+    let alive = true;
+    const tick = () => fetchAgents().then((p) => alive && setAgents(p)).catch(() => {});
+    tick();
+    const id = setInterval(tick, AGENTS_POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [route, tab]);
+
+  // Load the opportunity scan when the Hunter page opens (the server
+  // caches the heavy scan, so re-entering the page is cheap).
+  const refreshOpps = useCallback(() => {
+    fetchOpportunities().then(setOpps).catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (route === "hunter") refreshOpps();
+  }, [route, refreshOpps]);
+
   const onSelect = useCallback(async (id: string) => {
     setSelected(id);
     await selectStrategy(id).catch(() => {});
@@ -110,6 +145,12 @@ export function App() {
 
       {route === "config" ? (
         <ConfigPage />
+      ) : route === "hunter" ? (
+        opps ? (
+          <HunterView payload={opps} onRefresh={refreshOpps} />
+        ) : (
+          <Splash inline />
+        )
       ) : (
         <>
           <StrategySwitcher
@@ -137,6 +178,9 @@ export function App() {
             <button onClick={() => setTab("hist")} style={tabButtonStyle(tab === "hist")}>
               ◫ Historique
             </button>
+            <button onClick={() => setTab("agents")} style={tabButtonStyle(tab === "agents")}>
+              ◇ Agents
+            </button>
           </div>
 
           {tab === "live" ? (
@@ -146,19 +190,25 @@ export function App() {
               jcat={jcat}
               onJcat={setJcat}
             />
-          ) : history ? (
-            <HistoryView
-              history={history}
-              period={period}
-              bench={bench}
-              onPeriod={setPeriod}
-              onBench={setBench}
-            />
+          ) : tab === "hist" ? (
+            history ? (
+              <HistoryView
+                history={history}
+                period={period}
+                bench={bench}
+                onPeriod={setPeriod}
+                onBench={setBench}
+              />
+            ) : (
+              <Splash inline />
+            )
+          ) : agents ? (
+            <AgentsView payload={agents} />
           ) : (
             <Splash inline />
           )}
 
-          {history && (
+          {tab !== "agents" && history && (
             <Analysis history={history} capital={live.stats.capital} />
           )}
         </>

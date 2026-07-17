@@ -9,6 +9,9 @@ handoff mock.
 
 import math
 import time
+from datetime import UTC, datetime
+
+from web.server.agents import PLANNED_AGENTS
 
 BASE_PRICE: dict[str, float] = {
     "BTC": 98420, "ETH": 4380, "NVDA": 182.4, "AAPL": 246.8,
@@ -314,4 +317,279 @@ def history(strategy_id: str, period: str, bench: str) -> dict:
             "winLoss": {"wins": st["wins"], "losses": st["losses"]},
             "alloc": alloc, "assetBars": asset_bars,
         },
+    }
+
+
+# ── Agents pipeline (mirrors web/server/agents.py's real payload) ─────
+
+AGENTS: list[dict] = [
+    {
+        "id": "marche", "name": "Agent Marché",
+        "role": "Ingestion des barres de prix en temps réel",
+        "glyph": "◎", "color": "#4d8dff", "status": "ok",
+        "last": "il y a 12 s",
+        "inputs": [
+            "Flux WebSocket Alpaca (crypto + actions, barres 1 min)",
+            "Backfill historique au démarrage (Alpaca REST)",
+        ],
+        "outputs": [
+            "Barres OHLCV persistées (table bars)",
+            "Fenêtres glissantes mises à jour par actif",
+        ],
+        "actions": [
+            {"t": "14:32:07", "x": "Barre reçue BTC/USD @ 94 800",
+             "s": "ok"},
+            {"t": "14:32:00", "x": "Barre reçue NVDA @ 182.48", "s": "ok"},
+            {"t": "14:31:53", "x": "Barre reçue AAPL @ 246.64", "s": "ok"},
+        ],
+    },
+    {
+        "id": "rotation", "name": "Agent Rotation",
+        "role": "Sélection hebdomadaire du top-X (live/scorer.py)",
+        "glyph": "⟳", "color": "#38bdf8", "status": "wait",
+        "last": "il y a 3 j",
+        "inputs": [
+            "Backtest glissant par symbole (Sharpe annualisé)",
+            "Univers candidat suivi (30 symboles)",
+        ],
+        "outputs": [
+            "Top-5 des symboles à trader (config.json)",
+            "Rotation live (abonnement / liquidation, sans redémarrage)",
+        ],
+        "actions": [
+            {"t": "il y a 3j", "x": "Sélection top-5: BTC/USD, ETH/USD, "
+             "NVDA, AAPL, TSLA", "s": "ok"},
+            {"t": "il y a 3j", "x": "Retrait de MSFT (Sharpe insuffisant)",
+             "s": "ok"},
+        ],
+    },
+    {
+        "id": "signaux", "name": "Agent Signaux",
+        "role": "Calcule et agrège les votes des signaux actifs",
+        "glyph": "Σ", "color": "#2fd07f", "status": "ok",
+        "last": "il y a 12 s",
+        "inputs": [
+            "Fenêtres glissantes (closes / highs / lows / volumes)",
+            "Signaux actifs : BB, OU, VWAP, VolSpike, KalmanZ",
+            "Seuil de vote : 2 / 5",
+        ],
+        "outputs": [
+            "Votes buy / sell par signal",
+            "Décision agrégée BUY / SELL / HOLD",
+        ],
+        "actions": [
+            {"t": "14:32:07", "x": "BTC/USD: Achat — 3▲/0▼ sur 5 signaux",
+             "s": "ok"},
+            {"t": "14:18:44", "x": "TSLA: Vente — 0▲/2▼ sur 5 signaux",
+             "s": "ok"},
+            {"t": "14:05:12", "x": "AAPL: Hold — 1▲/0▼ sur 5 signaux",
+             "s": "wait"},
+        ],
+    },
+    {
+        "id": "risque", "name": "Agent Risque",
+        "role": "Contrôle de stop-loss avant toute logique de vote",
+        "glyph": "⛔", "color": "#ff5d6c", "status": "ok",
+        "last": "il y a 40 min",
+        "inputs": [
+            "Prix d'entrée de la position ouverte",
+            "Clôture courante de l'actif",
+            "Seuil stop-loss : 2%",
+        ],
+        "outputs": [
+            "Sortie immédiate si le seuil est franchi",
+            "Vente au marché (raison : stop-loss)",
+        ],
+        "actions": [
+            {"t": "11:59:31", "x": "STOP-LOSS ETH/USD @ 4 480 (-2.1%)",
+             "s": "err"},
+        ],
+    },
+    {
+        "id": "sizing", "name": "Agent Sizing",
+        "role": "Détermine la quantité selon la conviction du vote",
+        "glyph": "%", "color": "#8b9dff", "status": "ok",
+        "last": "il y a 2 min",
+        "inputs": [
+            "Conviction du vote (buy_votes / n_signals)",
+            "Capital total : 100 000$",
+            "Fourchette : 5%–20% du capital",
+        ],
+        "outputs": [
+            "Quantité à acheter en unités d'actif",
+            "Capital déployé mis à jour",
+        ],
+        "actions": [
+            {"t": "14:32:05", "x": "BTC/USD: 0.35 unités (~33 180$, "
+             "2.1% du capital)", "s": "ok"},
+            {"t": "12:39:58", "x": "AAPL: 120 unités (~29 892$, "
+             "5.8% du capital)", "s": "ok"},
+        ],
+    },
+    {
+        "id": "seuil", "name": "Agent Seuil",
+        "role": "Règle de déclenchement : quand acheter / vendre",
+        "glyph": "⇅", "color": "#22c1c3", "status": "ok",
+        "last": "il y a 12 s",
+        "inputs": [
+            "Seuil de vote : 2 / 5",
+            "Votes buy / sell agrégés (Agent Signaux)",
+            "Seuil stop-loss : 2%",
+        ],
+        "outputs": [
+            "ACHAT quand buy_votes ≥ 2",
+            "VENTE quand sell_votes ≥ 2 ou stop-loss",
+        ],
+        "actions": [
+            {"t": "14:32:07", "x": "BTC/USD: seuil franchi → Achat "
+             "(3 ≥ 2)", "s": "ok"},
+            {"t": "14:18:44", "x": "TSLA: seuil franchi → Vente "
+             "(2 ≥ 2)", "s": "ok"},
+        ],
+    },
+    {
+        "id": "execution", "name": "Agent Exécution",
+        "role": "Soumet l'ordre marché et persiste le trade",
+        "glyph": "⚡", "color": "#e06a8b", "status": "ok",
+        "last": "il y a 2 min",
+        "inputs": [
+            "Décision BUY / SELL (Agent Signaux ou Agent Risque)",
+            "Quantité à exécuter (Agent Sizing)",
+            "Client de trading Alpaca (ordre marché)",
+        ],
+        "outputs": [
+            "Ordre soumis à Alpaca",
+            "Trade persisté (table trades)",
+            "P&L réalisé sur les ventes",
+        ],
+        "actions": [
+            {"t": "14:32:07", "x": "ACHAT BTC/USD 0.35 @ 94 800 — vote",
+             "s": "ok"},
+            {"t": "14:18:44", "x": "VENTE TSLA 45 @ 402.00 (+3.1%) — vote",
+             "s": "ok"},
+            {"t": "11:59:31", "x": "VENTE ETH/USD 4.2 @ 4 480 (-2.1%) — "
+             "stop-loss", "s": "err"},
+        ],
+    },
+]
+
+
+def agents() -> dict:
+    """Return the demo Agents-tab payload (fixed pipeline snapshot)."""
+    return {"demo": True, "agents": [*AGENTS, *PLANNED_AGENTS]}
+
+
+# ── Opportunities (risky / high-upside scan) demo ─────────────────────
+
+# Fabricated candidates spanning the risk/reward plane, so the Chasseur
+# page is fully populated with no Alpaca data.  Fields mirror the real
+# ``opportunities`` payload; scores gently oscillate with wall time.
+_OPP_SEED: list[dict] = [
+    {"sym": "SMCI", "name": "Super Micro", "src": "mover", "price": 38.2,
+     "day": 6.4, "reward": 92, "risk": 82, "mom": 34, "vol": 4.1,
+     "brk": -1.2, "atr": 9.1, "gap": 5.8, "dv": 9_400_000, "news": 4},
+    {"sym": "IONQ", "name": "IonQ", "src": "mover", "price": 12.7,
+     "day": 8.9, "reward": 88, "risk": 90, "mom": 41, "vol": 5.2,
+     "brk": 0.4, "atr": 11.3, "gap": 7.1, "dv": 3_100_000, "news": 3},
+    {"sym": "MARA", "name": "Marathon Digital", "src": "active",
+     "price": 18.4, "day": 4.2, "reward": 79, "risk": 86, "mom": 22,
+     "vol": 3.3, "brk": -3.5, "atr": 10.2, "gap": 2.4, "dv": 6_800_000,
+     "news": 2},
+    {"sym": "CVNA", "name": "Carvana", "src": "watchlist", "price": 214.5,
+     "day": 2.7, "reward": 74, "risk": 63, "mom": 28, "vol": 2.1,
+     "brk": -0.8, "atr": 6.4, "gap": 1.2, "dv": 24_000_000, "news": 1},
+    {"sym": "SOUN", "name": "SoundHound AI", "src": "mover", "price": 6.1,
+     "day": 11.3, "reward": 85, "risk": 94, "mom": 52, "vol": 6.8,
+     "brk": 1.1, "atr": 13.7, "gap": 9.4, "dv": 2_200_000, "news": 5},
+    {"sym": "PLTR", "name": "Palantir", "src": "active", "price": 71.8,
+     "day": 1.9, "reward": 68, "risk": 55, "mom": 19, "vol": 1.8,
+     "brk": -1.9, "atr": 5.2, "gap": 0.6, "dv": 41_000_000, "news": 2},
+    {"sym": "RGTI", "name": "Rigetti", "src": "mover", "price": 3.4,
+     "day": 14.2, "reward": 83, "risk": 97, "mom": 61, "vol": 7.9,
+     "brk": 2.3, "atr": 16.1, "gap": 11.8, "dv": 1_600_000, "news": 3},
+    {"sym": "AFRM", "name": "Affirm", "src": "watchlist", "price": 44.9,
+     "day": 3.1, "reward": 71, "risk": 68, "mom": 24, "vol": 2.6,
+     "brk": -2.1, "atr": 7.3, "gap": 2.9, "dv": 12_000_000, "news": 1},
+    {"sym": "HOOD", "name": "Robinhood", "src": "active", "price": 28.6,
+     "day": 2.2, "reward": 66, "risk": 59, "mom": 17, "vol": 2.0,
+     "brk": -1.4, "atr": 5.9, "gap": 1.0, "dv": 18_000_000, "news": 1},
+    {"sym": "BBAI", "name": "BigBear.ai", "src": "mover", "price": 2.9,
+     "day": 9.6, "reward": 77, "risk": 95, "mom": 44, "vol": 5.7,
+     "brk": 0.2, "atr": 14.9, "gap": 8.2, "dv": 1_300_000, "news": 2},
+    {"sym": "DKNG", "name": "DraftKings", "src": "watchlist", "price": 39.7,
+     "day": 1.4, "reward": 58, "risk": 52, "mom": 12, "vol": 1.5,
+     "brk": -3.2, "atr": 4.8, "gap": 0.4, "dv": 15_000_000, "news": 0},
+    {"sym": "RIVN", "name": "Rivian", "src": "watchlist", "price": 13.2,
+     "day": -2.1, "reward": 49, "risk": 71, "mom": -8, "vol": 2.4,
+     "brk": -8.6, "atr": 8.1, "gap": -1.9, "dv": 9_900_000, "news": 1},
+    {"sym": "COIN", "name": "Coinbase", "src": "active", "price": 248.3,
+     "day": 3.8, "reward": 72, "risk": 64, "mom": 26, "vol": 2.3,
+     "brk": -0.5, "atr": 6.7, "gap": 2.1, "dv": 33_000_000, "news": 2},
+    {"sym": "LCID", "name": "Lucid", "src": "watchlist", "price": 2.3,
+     "day": -3.4, "reward": 41, "risk": 88, "mom": -14, "vol": 3.1,
+     "brk": -12.3, "atr": 9.8, "gap": -2.7, "dv": 4_500_000, "news": 0},
+    {"sym": "UPST", "name": "Upstart", "src": "mover", "price": 58.4,
+     "day": 5.6, "reward": 76, "risk": 74, "mom": 31, "vol": 3.0,
+     "brk": -0.9, "atr": 8.6, "gap": 4.3, "dv": 7_200_000, "news": 2},
+    {"sym": "CHPT", "name": "ChargePoint", "src": "watchlist", "price": 1.2,
+     "day": 1.1, "reward": 38, "risk": 92, "mom": -3, "vol": 2.7,
+     "brk": -18.4, "atr": 12.4, "gap": 0.8, "dv": 1_100_000, "news": 0},
+]
+
+
+def _opp_spark(base: float, seed: int) -> list[float]:
+    """Build a 20-point pseudo-random daily-close sparkline near ``base``."""
+    pts: list[float] = []
+    v = base * 0.82
+    for i in range(20):
+        v *= 1 + math.sin(seed * 1.7 + i * 0.9) * 0.03
+        pts.append(round(v, 2))
+    pts[-1] = base
+    return pts
+
+
+def _opp_why(o: dict) -> list[str]:
+    """Mirror the real scanner's explanatory tags for a demo row."""
+    tags: list[str] = []
+    if o["vol"] >= 2:
+        tags.append(f"Volume ×{o['vol']:.1f}")
+    if o["brk"] >= -2:
+        tags.append("Proche du plus-haut 60j")
+    if o["mom"] >= 15:
+        tags.append(f"Momentum +{o['mom']:.0f}% (20j)")
+    if abs(o["gap"]) >= 4:
+        tags.append(f"Gap {o['gap']:+.0f}%")
+    if o["news"] >= 2:
+        tags.append(f"{o['news']} news 48h")
+    if o["atr"] >= 6:
+        tags.append(f"Très volatil (ATR {o['atr']:.0f}%)")
+    return tags
+
+
+def opportunities() -> dict:
+    """Return the demo Chasseur-d'opportunités payload."""
+    now = time.time()
+    items: list[dict] = []
+    for i, o in enumerate(_OPP_SEED):
+        reward = max(1.0, min(100.0, o["reward"] + math.sin(now / 30 + i) * 2))
+        risk = max(1.0, min(100.0, o["risk"] + math.cos(now / 30 + i) * 2))
+        items.append({
+            "sym": o["sym"], "name": o["name"], "source": o["src"],
+            "price": o["price"], "dayChangePct": o["day"],
+            "reward": round(reward, 1), "risk": round(risk, 1),
+            "factors": {
+                "momentum": o["mom"], "volSurge": o["vol"],
+                "breakout": o["brk"], "atrPct": o["atr"],
+                "dollarVol": o["dv"], "gapPct": o["gap"], "news": o["news"],
+            },
+            "why": _opp_why(o),
+            "spark": _opp_spark(o["price"], i + 1),
+        })
+    items.sort(key=lambda x: x["reward"], reverse=True)
+    return {
+        "demo": True,
+        "generatedAt": datetime.now(UTC).isoformat(),
+        "count": len(items),
+        "guardrails": {"minPrice": 1.0, "minDollarVol": 1_000_000.0},
+        "items": items,
     }

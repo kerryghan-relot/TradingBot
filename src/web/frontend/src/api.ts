@@ -1,10 +1,12 @@
 // Thin fetch wrappers around the Flask JSON API.
 
 import type {
+  AgentsPayload,
   Bench,
   ConfigPayload,
   HistoryPayload,
   LivePayload,
+  OpportunitiesPayload,
   Period,
   StrategiesPayload,
 } from "./types";
@@ -38,6 +40,14 @@ export async function selectStrategy(id: string): Promise<void> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id }),
   });
+}
+
+export function fetchAgents(): Promise<AgentsPayload> {
+  return getJson("/api/agents");
+}
+
+export function fetchOpportunities(): Promise<OpportunitiesPayload> {
+  return getJson("/api/opportunities");
 }
 
 export function fetchConfig(): Promise<ConfigPayload> {

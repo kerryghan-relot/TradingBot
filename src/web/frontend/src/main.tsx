@@ -16,6 +16,7 @@ style.textContent = `
     70%  { box-shadow: 0 0 0 9px rgba(47,208,127,0); }
     100% { box-shadow: 0 0 0 0 rgba(47,208,127,0); }
   }
+  @keyframes dashflow { to { stroke-dashoffset: -24; } }
   ::-webkit-scrollbar { height: 8px; width: 8px; }
   ::-webkit-scrollbar-thumb { background: #2a3450; border-radius: 8px; }
   ::-webkit-scrollbar-track { background: transparent; }

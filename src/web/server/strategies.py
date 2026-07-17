@@ -34,13 +34,33 @@ def _universe(config: dict) -> str:
     return "all"
 
 
+# The strategy module set is fixed for the life of the process (modules
+# are imported once and cached in sys.modules), yet ``discover`` is
+# called several times per dashboard request.  Memoise the scan so it
+# runs once instead of re-listing the package on every call.
+_discover_cache: list[Strategy] | None = None
+
+# ``read_config`` is likewise called many times per request (live
+# payload, active-strategy match, each agent loader).  Cache the parsed
+# JSON keyed on the file's mtime so an unchanged config is not re-read
+# and re-parsed from disk each time; a write bumps the mtime and
+# invalidates the cache automatically.
+_config_cache: tuple[float, dict] | None = None
+
+
 def discover() -> list[Strategy]:
     """Import every ``strategies/*.py`` module exposing a STRATEGY.
+
+    The result is memoised after the first call (see ``_discover_cache``)
+    — the module set does not change while the process runs.
 
     Returns:
         list[Strategy]: All declared strategies, sorted by name. The
             canonical ``vote_mr`` is guaranteed present as a fallback.
     """
+    global _discover_cache
+    if _discover_cache is not None:
+        return _discover_cache
     found: list[Strategy] = []
     for mod in pkgutil.iter_modules(strategies_pkg.__path__):
         if mod.name.startswith("_"):
@@ -58,21 +78,37 @@ def discover() -> list[Strategy]:
             description="Configuration par défaut",
             config=dict(DEFAULT_CONFIG),
         ))
-    return sorted(found, key=lambda s: s.name)
+    _discover_cache = sorted(found, key=lambda s: s.name)
+    return _discover_cache
 
 
 def read_config() -> dict:
     """Return the live config merged over ``DEFAULT_CONFIG``.
 
+    The parsed ``config.json`` is cached by file mtime, so repeated
+    calls within a request avoid re-reading and re-parsing the file; a
+    write bumps the mtime and refreshes the cache. A fresh merged dict
+    is returned each call, so callers may safely mutate it.
+
     Returns:
         dict: The effective configuration the bot would load.
     """
+    global _config_cache
     base = dict(DEFAULT_CONFIG)
-    if CONFIG_FILE.exists():
-        try:
-            base.update(json.loads(CONFIG_FILE.read_text()))
-        except json.JSONDecodeError:
-            pass
+    try:
+        mtime = CONFIG_FILE.stat().st_mtime
+    except OSError:
+        return base
+    cached = _config_cache
+    if cached is not None and cached[0] == mtime:
+        base.update(cached[1])
+        return base
+    try:
+        loaded = json.loads(CONFIG_FILE.read_text())
+    except (json.JSONDecodeError, OSError):
+        return base
+    _config_cache = (mtime, loaded)
+    base.update(loaded)
     return base
 
 

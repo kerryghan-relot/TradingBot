@@ -8,6 +8,7 @@ exception, so ``app.py`` can fall back to demo data section by section.
 """
 
 import os
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -47,20 +48,39 @@ def display_name(symbol: str) -> str:
 
 # ── Database access ───────────────────────────────────────────────────
 
+# Connectivity rarely changes within a session, but probing it opens a
+# real connection — and when the DB is unreachable that probe blocks for
+# seconds (DNS/connect timeout).  A single request fans out to many
+# loaders, each calling ``db_available()``, so the result is cached for a
+# short TTL to avoid paying that cost repeatedly (see the dashboard
+# latency issue: an unreachable host turned one request into ~8 timeouts).
+_DB_AVAILABLE_TTL_S: float = 30.0
+_db_available_cache: tuple[float, bool] | None = None
+
+
 def db_available() -> bool:
     """Return True when the database is reachable and holds ``bars``.
 
-    Before the bot has created the schema (or when Postgres is
-    unreachable) this returns False, so ``app.py`` falls back to demo
-    data — the same behaviour the old on-disk check produced.
+    The probe result is cached for ``_DB_AVAILABLE_TTL_S`` seconds so a
+    single request (which calls this once per loader) opens at most one
+    connection instead of one per loader.  Before the bot has created
+    the schema (or when Postgres is unreachable) this returns False, so
+    ``app.py`` falls back to demo data.
     """
+    global _db_available_cache
+    now = time.monotonic()
+    if _db_available_cache is not None:
+        cached_at, cached_ok = _db_available_cache
+        if now - cached_at < _DB_AVAILABLE_TTL_S:
+            return cached_ok
     try:
         conn = _connect()
         ok = _table_exists(conn, "bars")
         conn.close()
-        return ok
     except psycopg.Error:
-        return False
+        ok = False
+    _db_available_cache = (now, ok)
+    return ok
 
 
 def _connect() -> psycopg.Connection:
@@ -150,23 +170,32 @@ def tickers(symbols: list[str]) -> list[dict]:
             conn.close()
             return []
         for symbol in symbols:
-            rows = conn.execute(
+            latest = conn.execute(
                 "SELECT timestamp, close FROM bars WHERE symbol = %s "
-                "ORDER BY timestamp DESC LIMIT 1600",
+                "ORDER BY timestamp DESC LIMIT 1",
                 (symbol,),
-            ).fetchall()
-            if not rows:
+            ).fetchone()
+            if not latest:
                 continue
-            price = rows[0]["close"]
-            newest = datetime.fromisoformat(rows[0]["timestamp"])
-            ref = price
-            for r in rows:
-                ts = datetime.fromisoformat(r["timestamp"])
-                if newest - ts >= timedelta(hours=24):
-                    ref = r["close"]
-                    break
-            else:
-                ref = rows[-1]["close"]
+            price = latest["close"]
+            newest = datetime.fromisoformat(latest["timestamp"])
+            # ISO-8601 text sorts chronologically, so the reference close
+            # is the newest bar at least 24h old; fall back to the oldest
+            # stored bar when history is shorter than 24h.  Two indexed
+            # single-row lookups instead of scanning ~1600 rows per symbol.
+            threshold = (newest - timedelta(hours=24)).isoformat()
+            ref_row = conn.execute(
+                "SELECT close FROM bars WHERE symbol = %s "
+                "AND timestamp <= %s ORDER BY timestamp DESC LIMIT 1",
+                (symbol, threshold),
+            ).fetchone()
+            if ref_row is None:
+                ref_row = conn.execute(
+                    "SELECT close FROM bars WHERE symbol = %s "
+                    "ORDER BY timestamp ASC LIMIT 1",
+                    (symbol,),
+                ).fetchone()
+            ref = ref_row["close"] if ref_row else price
             chg = (price - ref) / ref * 100 if ref else 0.0
             out.append({
                 "sym": base_symbol(symbol),
@@ -339,7 +368,42 @@ def _alpaca_headers() -> dict[str, str]:
     return {"APCA-API-KEY-ID": key or "", "APCA-API-SECRET-KEY": secret or ""}
 
 
+# Alpaca responses are cached for a short TTL so a single dashboard
+# render (and the recurring live poll) doesn't fire the same HTTP calls
+# repeatedly.  Account/positions turn over fast, so a small window; the
+# equity curve changes slowly, so a longer one — this is what makes the
+# performance chart appear instantly when toggling period/benchmark or
+# re-opening the History tab instead of re-fetching each time.
+_ALPACA_ACCOUNT_TTL_S: float = 2.0
+_ALPACA_PORTFOLIO_TTL_S: float = 15.0
+_account_cache: tuple[float, tuple[dict, list[dict]]] | None = None
+_portfolio_cache: dict[str, tuple[float, list[float] | None]] = {}
+
+
 def account_and_positions() -> tuple[dict, list[dict]]:
+    """Return Alpaca account balance and open positions (cached ~2s).
+
+    Wraps :func:`_fetch_account_and_positions` with a short-TTL cache;
+    successful results are cached, errors are not (so a transient
+    failure retries on the next call).
+
+    Returns:
+        tuple: ``(account, positions)`` — see the fetch helper.
+    """
+    global _account_cache
+    now = time.monotonic()
+    if (
+        _account_cache is not None
+        and now - _account_cache[0] < _ALPACA_ACCOUNT_TTL_S
+    ):
+        return _account_cache[1]
+    result = _fetch_account_and_positions()
+    if not result[0].get("_error"):
+        _account_cache = (now, result)
+    return result
+
+
+def _fetch_account_and_positions() -> tuple[dict, list[dict]]:
     """Fetch account balance and open positions from Alpaca paper.
 
     Returns:
@@ -397,6 +461,28 @@ def account_and_positions() -> tuple[dict, list[dict]]:
 
 
 def portfolio_history(period: str) -> list[float] | None:
+    """Return the Alpaca equity curve for a period (cached ~15s).
+
+    Wraps :func:`_fetch_portfolio_history` with a per-period TTL cache,
+    so toggling the benchmark (same period) or re-opening the History
+    tab reuses the last curve instead of re-fetching it.
+
+    Args:
+        period (str): ``"day"``, ``"week"``, ``"month"`` or ``"all"``.
+
+    Returns:
+        list[float] | None: Equity values, or ``None`` when unavailable.
+    """
+    now = time.monotonic()
+    cached = _portfolio_cache.get(period)
+    if cached is not None and now - cached[0] < _ALPACA_PORTFOLIO_TTL_S:
+        return cached[1]
+    result = _fetch_portfolio_history(period)
+    _portfolio_cache[period] = (now, result)
+    return result
+
+
+def _fetch_portfolio_history(period: str) -> list[float] | None:
     """Fetch the Alpaca equity curve for a dashboard period.
 
     Args:
