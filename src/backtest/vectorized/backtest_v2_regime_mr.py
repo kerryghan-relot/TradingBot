@@ -404,12 +404,12 @@ def run() -> None:
     )
     print("\n" + "=" * 72)
     print(
-        f"V2 regime-gated MR | params: z_entry={best.z_entry} "
+        f"V2 MR filtrée par régime | params : z_entry={best.z_entry} "
         f"er_max={best.er_max} min_sigma_rel={best.min_sigma_rel}"
     )
     print(
         f"TEST {split_ts.date()} -> {union[-1].date()} "
-        f"({years_test:.2f} years), cost {COST_PER_SIDE:.2%}/side"
+        f"({years_test:.2f} ans), coût {COST_PER_SIDE:.2%}/side"
     )
     print("-" * 72)
     print(df_rows.to_string(index=False))
@@ -422,22 +422,22 @@ def run() -> None:
         if any(test_trades.values()) else np.empty(0)
     )
     print(
-        f"Portfolio TEST: ret={float(test_eq.iloc[-1] - 1) * 100:+.2f}%  "
+        f"TEST portefeuille : ret={float(test_eq.iloc[-1] - 1) * 100:+.2f}%  "
         f"sharpe={sharpe(test.to_numpy(), bpy_test):+.3f}  "
         f"maxDD={max_drawdown(test_eq.to_numpy()) * 100:.2f}%  "
         f"trades={n_tr}"
     )
     if len(all_nets):
         print(
-            f"Per-trade (all symbols): avg net "
+            f"Par trade (tous symboles) : net moyen "
             f"{all_nets.mean() * 100:+.3f}%  "
-            f"win rate {(all_nets > 0).mean() * 100:.1f}%"
+            f"taux de gain {(all_nets > 0).mean() * 100:.1f}%"
         )
     print(
-        f"Random-entry benchmark: strategy beats "
-        f"{pct_beaten:.0f}% of {N_RANDOM_DRAWS} draws "
-        f"(median random {np.median(rand_totals) * 100:+.2f}% "
-        f"vs strategy {strat_draw * 100:+.2f}%)"
+        f"Benchmark entrée aléatoire : la stratégie bat "
+        f"{pct_beaten:.0f}% des {N_RANDOM_DRAWS} tirages "
+        f"(médiane aléatoire {np.median(rand_totals) * 100:+.2f}% "
+        f"vs stratégie {strat_draw * 100:+.2f}%)"
     )
     print("=" * 72)
 

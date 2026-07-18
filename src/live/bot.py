@@ -461,7 +461,7 @@ class CryptoBot:
             total += len(rows)
             log.info(f"   {symbol}: {len(rows)} bars")
 
-        log.info(f"⬇️  Backfill terminé ({total} bars).")
+        log.info(f"⬇️  Backfill done ({total} bars).")
 
     def _preload_from_db(self) -> None:
         """Restore rolling windows for all assets from persisted bar history.
@@ -587,16 +587,16 @@ class CryptoBot:
             if asset.in_position:
                 close = asset.closes[-1] if asset.closes else 0.0
                 log.info(
-                    f"🔀 {asset.ticker}: sorti de la sélection — "
-                    f"liquidation de la position"
+                    f"🔀 {asset.ticker}: dropped from the selection — "
+                    f"liquidating the position"
                 )
                 rot_qty = self._sell_qty(asset, close)
                 if not self.place_order(
                     asset, OrderSide.SELL, close, "rotation", rot_qty
                 ):
                     log.warning(
-                        f"⚠️  {asset.ticker}: liquidation échouée — "
-                        f"symbole conservé jusqu'à la prochaine rotation"
+                        f"⚠️  {asset.ticker}: liquidation failed — "
+                        f"symbol kept until the next rotation"
                     )
                     continue
                 asset.in_position = False
@@ -609,7 +609,7 @@ class CryptoBot:
             except Exception as exc:
                 log.warning(f"⚠️  {symbol}: unsubscribe failed: {exc}")
             del self.assets[symbol]
-            log.info(f"➖ {symbol}: désabonné")
+            log.info(f"➖ {symbol}: unsubscribed")
 
         for symbol in added:
             asset = AssetState(symbol)
@@ -630,7 +630,7 @@ class CryptoBot:
                 del self.assets[symbol]
                 continue
             log.info(
-                f"➕ {symbol}: abonné ({len(bars)} barres préchargées)"
+                f"➕ {symbol}: subscribed ({len(bars)} bars preloaded)"
             )
 
         self._crypto_syms = [s for s in self.assets if is_crypto(s)]
@@ -850,7 +850,7 @@ class CryptoBot:
         if is_sell and prev_entry:
             pnl_pct = (close - prev_entry) / prev_entry
             log.info(
-                f"    💹 {asset.ticker} P&L réalisé: {pnl_pct * 100:+.2f}%"
+                f"    💹 {asset.ticker} realised P&L: {pnl_pct * 100:+.2f}%"
             )
         try:
             save_trade(
@@ -974,7 +974,7 @@ class CryptoBot:
             elif buy_qty <= 0:
                 log.info(
                     f"{log_line}  →  BUY blocked "
-                    f"(budget {cfg.get('total_capital', 0):.0f}$ épuisé)"
+                    f"(budget {cfg.get('total_capital', 0):.0f}$ exhausted)"
                 )
             elif self.place_order(
                 asset, OrderSide.BUY, close, "vote", buy_qty
@@ -1110,7 +1110,7 @@ class CryptoBot:
             ready (asyncio.Event): Set once the stream has ≥ 1 symbol.
         """
         await ready.wait()
-        log.info(f"📡 {name.capitalize()} stream démarré")
+        log.info(f"📡 {name.capitalize()} stream started")
         await self._run_with_retry(stream, name)
 
     def run(self) -> None:

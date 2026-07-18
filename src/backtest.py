@@ -1,10 +1,10 @@
 """
-CLI — backtest une stratégie sur les CSV historiques.
-======================================================
-Rejoue la stratégie bar par bar via ``core.engine`` — exactement le
-code que le bot live exécute.
+CLI — backtest a strategy over the historical CSVs.
+===================================================
+Replays the strategy bar by bar via ``core.engine`` — exactly the
+code the live bot runs.
 
-Usage (depuis src/)::
+Usage (from src/)::
 
     python backtest.py vote_mr
     python backtest.py vote_mr --symbols AAPL NVDA BTC/USD
@@ -18,7 +18,7 @@ from strategies import load_strategy
 
 
 def main() -> None:
-    """Parse la ligne de commande et lance le backtest événementiel."""
+    """Parse the command line and run the event-driven backtest."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = argparse.ArgumentParser(
         description="Backtest événementiel d'une stratégie "

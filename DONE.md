@@ -3,59 +3,66 @@
 This file lists completed work and briefly explains what changed. Update it after every addition or significant change to the project.
 Each point must be concise (max 2 sentences); link a commit for full context when needed.
 
-## 2026-07-17 — Agents `software-architect` + `nemesis` (boucle de conception adverse)
+## 2026-07-17 — Language convention + docs reorganisation
 
-- **`.claude/agents/software-architect.md`** (nouveau) — architecte senior sous opus, **agnostique du langage** : il raisonne sur les frontières, les invariants et le coût de migration, pas sur les idiomes Python. Il rédige un brouillon dans `docs/.architecture-design/` et n'implémente pas (pas d'outil `Edit`).
-- **`.claude/agents/nemesis.md`** (nouveau) — relecteur adverse sous sonnet, **générique** : on lui donne le chemin d'un document (conception, plan, migration) et il en attaque le raisonnement. Toute objection doit décrire une défaillance concrète ; s'il ne trouve rien, il le dit plutôt que de meubler.
-- **L'arbitrage reste dans la conversation principale** — l'architecte ne juge pas la critique de son propre travail, et un agent superviseur a été écarté puisque le fil principal tient déjà ce rôle. Un aller-retour maximum, puis la décision remonte à l'utilisateur.
-- **Réservé aux décisions coûteuses à annuler** : une question d'architecture courante se répond directement, sans payer deux démarrages à froid.
-- **`docs/.architecture-design/`** — seul le `README.md` est versionné (`docs/.architecture-design/*` puis exception `!` ; le `/` final aurait empêché git de descendre dans le dossier). Les brouillons sont écrits pour être détruits ; une conception retenue est promue vers l'issue, `CLAUDE.md` ou le code.
-- **Testé deux fois sur #6** (modèle d'exécution multi-tenant, travail jeté) : nemesis a trouvé une prémisse fausse dans le rejet du process-par-utilisateur — un montage `:ro` de `docker.sock` n'empêche pas les écritures, et ofelia fait déjà `job-exec` à travers lui (`docker-compose.yml:34,57,103`).
+- **`.claude/rules/language.md`** (new) — formalises the split: English for machine- and developer-facing text (code, comments, docstrings, `logger` logs, READMEs, `TODO.md` / `DONE.md`, commits, DB), French for end-user-facing text (CLI output via `print`/`argparse`/`SystemExit`, dashboard UI strings, and domain docs). `CLAUDE.md`'s Language bullet now points here.
+- **Technical docs translated to English**: `DONE.md`, `src/README.md`, `src/deploy/README.md`, and the root `README.md` references. In the `.py` code, comments, docstrings and `logger` messages are English; all CLI output (`print` / `argparse` / `SystemExit`) and Streamlit / `web/server` UI strings are French — several research scripts whose CLI output was originally English were standardised to French after a `nemesis` review flagged the inconsistency. The rule also requires English prose to quote French code references (e.g. sidebar page names) verbatim so Ctrl+F links them.
+- **Docs promoted to a root `docs/`**: `src/docs/GUIDE_SIGNAUX_METHODES.md` → `docs/` (kept French — it explains the trading domain), joining the existing `docs/.architecture-design/`.
+- **`archive/` promoted to the repo root** (`src/archive/` → `archive/`), and `REFACTOR_PLAN.md` moved into it. The archive is treated as frozen: its files, including the now-reverted French `REFACTOR_PLAN.md` (a historical document), are left in their original language.
 
-## 2026-07-16 — Agents sécurité (`security-analyst` + `security-fixer`) et permissions `gh` en écriture
+## 2026-07-17 — Agents `software-architect` + `nemesis` (adversarial design loop)
 
-- **`.claude/agents/security-analyst.md`** (nouveau, premier agent du dépôt) — relecture sécurité sous opus, **lecture seule** (pas d'outil `Edit`) : il lance `/security-review`, applique le skill `security-checklist` et écrit un rapport dans `security-reports/`. Il ne touche jamais au code.
-- **`.claude/agents/security-fixer.md`** (nouveau) — applique les correctifs d'un rapport **déjà approuvé** par l'utilisateur, un point à la fois, sans élargir le périmètre. Ne commit ni ne push. La confirmation entre les deux se fait dans la conversation principale, car un sous-agent n'a pas `AskUserQuestion`.
-- **`.claude/skills/security-checklist/`** (nouveau) — les points sensibles du dépôt : `.env` / clés Alpaca, l'écriture distante `/api/config`, le check crédentiel à l'import, TLS auto-signé + basic-auth, et la construction SQL dans `core/db.py`. Complète `/security-review` (scanner générique) sans le dupliquer.
-- **`security-reports/`** — versionné (historique partagé), mais le dépôt est **public** : aucun exploit ni secret dans un rapport, une faille sévère non publique passe par un GitHub Security Advisory privé.
-- **`.claude/settings.json`** — les verbes `gh` en écriture (`issue create` / `edit` / `close` / `delete`, `pr create` / `merge` / `close`, `release create` / `delete`) passent en `ask` : créer une issue ou une PR demande désormais confirmation.
+- **`.claude/agents/software-architect.md`** (new) — senior architect under opus, **language-agnostic**: it reasons about boundaries, invariants and migration cost, not about Python idioms. It drafts into `docs/.architecture-design/` and does not implement (no `Edit` tool).
+- **`.claude/agents/nemesis.md`** (new) — adversarial reviewer under sonnet, **generic**: you give it the path to a document (design, plan, migration) and it attacks its reasoning. Every objection must describe a concrete failure; if it finds nothing, it says so rather than padding.
+- **Adjudication stays in the main conversation** — the architect does not grade the critique of its own work, and a supervisor agent was rejected since the main thread already fills that role. One round-trip at most, then the decision reaches the user.
+- **Reserved for decisions that are expensive to reverse**: an ordinary architecture question is answered directly, without paying for two cold starts.
+- **`docs/.architecture-design/`** — only the `README.md` is versioned (`docs/.architecture-design/*` then a `!` exception; the trailing `/` would have stopped git from descending into the folder). Drafts are written to be destroyed; a design worth keeping is promoted to its issue, `CLAUDE.md` or the code.
+- **Tested twice on #6** (multi-tenant execution model, discarded work): nemesis found a false premise in the rejection of the process-per-user approach — a `:ro` mount of `docker.sock` does not prevent writes, and ofelia already does `job-exec` through it (`docker-compose.yml:34,57,103`).
 
-## 2026-07-16 — Accès GitHub (`gh`) et règles de workflow
+## 2026-07-16 — Security agents (`security-analyst` + `security-fixer`) and write `gh` permissions
 
-- **GitHub CLI installé** (`gh` 2.96.0, via winget) et authentifié en OAuth : le jeton vit dans le trousseau Windows plutôt que dans un fichier du dépôt. Claude peut désormais lire et créer des issues.
-- **`.claude/settings.json`** — les sous-commandes `gh` en lecture seule (`auth status`, `issue list` / `view`, `label list`, `pr list` / `view` / `diff`) passent en `allow`, et `gh issue develop` en `ask`. `gh api` reste volontairement hors liste : `--method` en fait une écriture que le filtrage par préfixe ne peut pas voir.
-- **`.claude/rules/github.md`** (nouveau) — lire les commentaires d'une issue avant de travailler dessus, interviewer l'utilisateur plutôt que deviner, et créer les branches via `gh issue develop --name <login>/<numéro>-<slug>`. `git checkout -b` ne relie pas la branche à son issue et ne la referme donc pas à la fusion.
-- **`commits.md`** — `gh issue develop` ajouté aux actions de branche : voie sanctionnée pour créer une branche, mais elle écrit une ref sur `origin` et demande donc confirmation comme les autres.
-- **Issues ouvertes** : #4 (authentification + 2FA TOTP), #5 (vrai TLS via Certbot) et #6 (config par utilisateur, multi-tenant), #6 étant bloquée par #4.
+- **`.claude/agents/security-analyst.md`** (new, the repo's first agent) — security review under opus, **read-only** (no `Edit` tool): it runs `/security-review`, applies the `security-checklist` skill and writes a report into `security-reports/`. It never touches the code.
+- **`.claude/agents/security-fixer.md`** (new) — applies the fixes from a report **already approved** by the user, one point at a time, without widening the scope. It neither commits nor pushes. The confirmation between the two happens in the main conversation, since a sub-agent does not have `AskUserQuestion`.
+- **`.claude/skills/security-checklist/`** (new) — the repo's sensitive points: `.env` / Alpaca keys, the `/api/config` remote write, the import-time credential check, self-signed TLS + basic auth, and SQL construction in `core/db.py`. Complements `/security-review` (generic scanner) without duplicating it.
+- **`security-reports/`** — versioned (shared history), but the repo is **public**: no exploit and no secret in a report, a severe non-public flaw goes through a private GitHub Security Advisory.
+- **`.claude/settings.json`** — the write `gh` verbs (`issue create` / `edit` / `close` / `delete`, `pr create` / `merge` / `close`, `release create` / `delete`) move to `ask`: creating an issue or a PR now requires confirmation.
 
-## 2026-07-15 — Renommage `lucas-trading/` → `src/`
+## 2026-07-16 — GitHub access (`gh`) and workflow rules
 
-- **Dossier renommé** en `src/` via `git mv`, pour suivre la convention classique et abandonner le nommage personnel. Aucun import ne change : les paquets (`core`, `live`, `web`, …) restent de premier niveau à l'intérieur du dossier.
-- **Références mises à jour** : `Dockerfile`, `docker-compose.yml`, `.gitignore`, `.dockerignore`, `.claude/launch.json`, les README, `CLAUDE.md`, le skill `db-analyze`, les scripts de déploiement et les docstrings.
-- **Paquet npm** `lucas-trading-dashboard` → `tradingbot-dashboard`, dans `package.json` et `package-lock.json`. Synchronisation vérifiée par `npm ci --dry-run`, dont dépend le build du front dans l'image.
-- **`REFACTOR_PLAN.md`** garde les noms d'origine (document historique) et porte désormais un encart signalant le renommage.
-- **Vérifié** : `compileall` sur tout `src/`, imports `core` / `strategies` / `web` depuis `src/`, et `docker compose config` qui résout bien les binds vers `./src/…`.
+- **GitHub CLI installed** (`gh` 2.96.0, via winget) and authenticated over OAuth: the token lives in the Windows keychain rather than in a repo file. Claude can now read and create issues.
+- **`.claude/settings.json`** — the read-only `gh` subcommands (`auth status`, `issue list` / `view`, `label list`, `pr list` / `view` / `diff`) move to `allow`, and `gh issue develop` to `ask`. `gh api` is deliberately kept off the list: `--method` turns it into a write that prefix matching cannot see.
+- **`.claude/rules/github.md`** (new) — read an issue's comments before working on it, interview the user rather than guess, and create branches via `gh issue develop --name <login>/<number>-<slug>`. `git checkout -b` does not link the branch to its issue and therefore does not close it on merge.
+- **`commits.md`** — `gh issue develop` added to the branch actions: the sanctioned way to create a branch, but it writes a ref to `origin` and therefore asks for confirmation like the others.
+- **Open issues**: #4 (authentication + 2FA TOTP), #5 (real TLS via Certbot) and #6 (per-user config, multi-tenant), #6 being blocked by #4.
 
-## 2026-07-15 — Conventions de rédaction des docs
+## 2026-07-15 — Renaming `lucas-trading/` → `src/`
 
-- **Plus de retour à la ligne forcé** dans le markdown : un paragraphe ou une puce tient sur une seule ligne, l'éditeur se charge du rendu. Règle ajoutée dans `CLAUDE.md`, appliquée à `CLAUDE.md`, `README.md`, `TODO.md`, `DONE.md` et au skill `db-analyze`.
-- **`TODO.md` / `DONE.md`** — règle de concision ajoutée en tête (2 phrases par point maximum, le contexte long va dans une issue ou un commit) et descriptions existantes raccourcies.
+- **Directory renamed** to `src/` via `git mv`, to follow the classic convention and drop the personal naming. No import changes: the packages (`core`, `live`, `web`, …) stay top-level inside the directory.
+- **References updated**: `Dockerfile`, `docker-compose.yml`, `.gitignore`, `.dockerignore`, `.claude/launch.json`, the READMEs, `CLAUDE.md`, the `db-analyze` skill, the deployment scripts and the docstrings.
+- **npm package** `lucas-trading-dashboard` → `tradingbot-dashboard`, in `package.json` and `package-lock.json`. Sync verified by `npm ci --dry-run`, on which the front build in the image depends.
+- **`REFACTOR_PLAN.md`** keeps the original names (historical document) and now carries a note flagging the rename.
+- **Verified**: `compileall` over all of `src/`, `core` / `strategies` / `web` imports from `src/`, and `docker compose config` which resolves the binds to `./src/…` correctly.
 
-## 2026-07-15 — Documentation et nettoyage des skills (cb2f950)
+## 2026-07-15 — Docs writing conventions
 
-- **`README.md` (racine)** — le placeholder d'une ligne devient la vue d'ensemble : principe « une stratégie, deux moteurs », features, stack, ofelia, structure. Renvoie vers `src/README.md` (workflow) et `deploy/README.md` (exploitation).
-- **`CLAUDE.md`** — réécrit pour Claude Code : commandes réelles, moteur partagé et ses trois appelants, et les pièges non devinables (`config.json` fait foi et non le fichier stratégie, `indicators.timestamp` ≠ `bars.timestamp`, `core/broker.py` lève à l'import sans clés).
-- **Skills supprimés** : `bot-status` et `tune-config`, écrits pour l'ancienne base SQLite `bars.db` et le dossier `kerryghan_paper-trading/`, tous deux supprimés depuis.
-- **Skill `db-analyze` réécrit** pour PostgreSQL : connexion via `docker compose exec` (la base n'expose aucun port hôte), schéma réel, découverte dynamique des symboles et section P&L réalisé. Les colonnes `regime` / `rsi` / `bb_*` de l'ancienne version n'existent pas dans ce moteur de vote.
-- **`TODO.md`** — analyse des points d'amélioration ajoutée (correctness, duplication, base de données, build, dérive des docs).
+- **No more forced line breaks** in markdown: a paragraph or a bullet fits on a single line, the editor handles the rendering. Rule added in `CLAUDE.md`, applied to `CLAUDE.md`, `README.md`, `TODO.md`, `DONE.md` and the `db-analyze` skill.
+- **`TODO.md` / `DONE.md`** — conciseness rule added at the top (2 sentences per point maximum, long context goes into an issue or a commit) and existing descriptions shortened.
 
-## 2026-07-15 — Convention de commits et releases automatisées (c375abc, 47dca39, c2b0b44)
+## 2026-07-15 — Documentation and skill cleanup (cb2f950)
 
-- **`.claude/rules/commits.md`** (nouveau) — Conventional Commits : types autorisés, breaking changes, scopes, interdiction de `--no-verify`, critères Major/Minor/Patch. Règle reprise d'un autre projet (JS/Husky/commitlint) et adaptée à la stack Python/uv.
-- **Scopes** = les modules de premier niveau (`core`, `backtest`, `live`, `strategies`, `web`, `tools`, `deploy`, `config`, `docs`) plus `infra` pour le stack conteneur et les dépendances de la racine.
-- **Hook `commit-msg`** — commitizen via le framework `pre-commit`, avec un `schema_pattern` qui valide aussi les scopes. À activer une fois par clone : `uv run pre-commit install`.
-- **Aucun hook au stade `pre-commit`** — il n'y a ni linter ni tests dans le repo, contrairement au projet d'origine.
-- **release-please** (`release-type: python`) — bump du `version` de `pyproject.toml` et génération de `CHANGELOG.md` par PR de release sur `main`. `bump-minor-pre-major: false` : le premier breaking change sortira en `1.0.0`.
-- **Token `GITHUB_TOKEN`** plutôt qu'un PAT, donc la case *Allow GitHub Actions to create and approve pull requests* doit être cochée une fois. Détaillé en commentaire en tête du workflow.
-- **Dépendances dev hors de l'image** (47dca39) — `uv sync` installait le groupe dev dans le conteneur alors qu'aucun commit n'y est rédigé.
-- **Commits confirmés, push bloqué** (c2b0b44) — règles de permission dans `.claude/settings.json` ; `commits.md` porte l'intention pour les pushes indirects.
+- **`README.md` (root)** — the one-line placeholder becomes the overview: "one strategy, two engines" principle, features, stack, ofelia, structure. Points to `src/README.md` (workflow) and `deploy/README.md` (operations).
+- **`CLAUDE.md`** — rewritten for Claude Code: real commands, the shared engine and its three callers, and the non-guessable traps (`config.json` wins over the strategy file, `indicators.timestamp` ≠ `bars.timestamp`, `core/broker.py` raises at import without keys).
+- **Skills removed**: `bot-status` and `tune-config`, written for the old SQLite `bars.db` store and the `kerryghan_paper-trading/` directory, both since deleted.
+- **`db-analyze` skill rewritten** for PostgreSQL: connection via `docker compose exec` (the database exposes no host port), real schema, dynamic symbol discovery and a realised P&L section. The `regime` / `rsi` / `bb_*` columns of the old version do not exist in this vote engine.
+- **`TODO.md`** — improvement-point analysis added (correctness, duplication, database, build, docs drift).
+
+## 2026-07-15 — Commit convention and automated releases (c375abc, 47dca39, c2b0b44)
+
+- **`.claude/rules/commits.md`** (new) — Conventional Commits: allowed types, breaking changes, scopes, `--no-verify` ban, Major/Minor/Patch criteria. Rule carried over from another project (JS/Husky/commitlint) and adapted to the Python/uv stack.
+- **Scopes** = the top-level modules (`core`, `backtest`, `live`, `strategies`, `web`, `tools`, `deploy`, `config`, `docs`) plus `infra` for the repo-root container stack and dependencies.
+- **`commit-msg` hook** — commitizen via the `pre-commit` framework, with a `schema_pattern` that also validates the scopes. To be activated once per clone: `uv run pre-commit install`.
+- **No hook at the `pre-commit` stage** — there is neither a linter nor tests in the repo, unlike the original project.
+- **release-please** (`release-type: python`) — bumps the `version` in `pyproject.toml` and generates `CHANGELOG.md` via a release PR on `main`. `bump-minor-pre-major: false`: the first breaking change will ship as `1.0.0`.
+- **`GITHUB_TOKEN` token** rather than a PAT, so the *Allow GitHub Actions to create and approve pull requests* box must be checked once. Detailed in a comment at the top of the workflow.
+- **Dev dependencies out of the image** (47dca39) — `uv sync` was installing the dev group in the container even though no commit is written there.
+- **Commits confirmed, push blocked** (c2b0b44) — permission rules in `.claude/settings.json`; `commits.md` carries the intent for indirect pushes.

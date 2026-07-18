@@ -11,7 +11,7 @@ Each point must be concise (max 2 sentences); link a GitHub issue for full conte
 
 ## Correctness / risk
 
-- [ ] **No test suite.** The signal maths and vote engine are pure functions and they decide trades, yet `REFACTOR_PLAN.md` §5 leaves stateful ↔ vectorized parity unvalidated.
+- [ ] **No test suite.** The signal maths and vote engine are pure functions and they decide trades, yet `archive/REFACTOR_PLAN.md` §5 leaves stateful ↔ vectorized parity unvalidated.
 - [ ] **Crypto CSVs carry no volume**, so VolSpike and VWAP never vote on BTC/ETH in research (noted in `backtest_scorer_oos.py`). Two of the live strategy's five signals are therefore dead on crypto in every backtest.
 - [ ] **`/api/config` has no demo path** — GET and POST always write the real `config.json`, even when the dashboard serves demo data. A demo UI can silently reconfigure a live bot.
 - [ ] **Config editor gaps.** `macd_fast`/`macd_slow`, `kalman_q`/`kalman_r`/`kalman_roll_win`, `orb_bars` and `time_skip` are missing from `web/server/strategies.py:EDITABLE` although their signals are toggleable — enable from the browser, but no way to tune.
@@ -19,7 +19,7 @@ Each point must be concise (max 2 sentences); link a GitHub issue for full conte
 
 ## Duplication creeping back
 
-- [ ] **`web/server/data.py` re-implements Alpaca access** with raw `requests` and its own `is_crypto` instead of using `core/broker.py` — the duplication `REFACTOR_PLAN.md` §2.3 set out to kill.
+- [ ] **`web/server/data.py` re-implements Alpaca access** with raw `requests` and its own `is_crypto` instead of using `core/broker.py` — the duplication `archive/REFACTOR_PLAN.md` §2.3 set out to kill.
 - [ ] **`backtest/vectorized/optimize.py` re-implements** `sig_bb`, `sig_ema_cross`, `sig_macd_zero` and `sig_zscore` locally, without importing `strategies_vbt`. That is a fourth copy of the signal maths.
 - [ ] **`core/broker.py` raises at import** when Alpaca keys are missing, so `live.bot` and `live.scorer` cannot be imported or tested without secrets. Moving the check into the `make_*` factories would fix it.
 
@@ -33,7 +33,7 @@ Each point must be concise (max 2 sentences); link a GitHub issue for full conte
 
 - [ ] **The bot image ships the whole research stack** — `streamlit`, `dash`, `plotly`, `vectorbt`, `xgboost` and the Jupyter packages sit in main `dependencies`. Moving them to a `research` group would cut image size sharply (`requests` is also listed twice).
 - [ ] **No linter enforces `.claude/rules/code-style.md`.** `ruff` could check nearly all of it mechanically (80 cols, PEP 8, `X | None`, built-in generics).
-- [ ] **Two dashboards remain unfused** (Streamlit for research, React for live), deferred as out of scope by `REFACTOR_PLAN.md` §6.3.
+- [ ] **Two dashboards remain unfused** (Streamlit for research, React for live), deferred as out of scope by `archive/REFACTOR_PLAN.md` §6.3.
 
 ## Ergonomics / docs drift
 

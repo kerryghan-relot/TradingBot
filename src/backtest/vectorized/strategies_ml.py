@@ -246,4 +246,4 @@ STRATEGIES: dict[str, object] = {
     "XGBoost": xgboost_strategy,
 }
 
-print("[strategies_ML.py] XGBoost strategy loaded.")
+print("[strategies_ML.py] Stratégie XGBoost chargée.")

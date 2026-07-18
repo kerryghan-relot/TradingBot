@@ -1,13 +1,13 @@
 """
-Générateur de données fictives pour tester le dashboard.
-=========================================================
-Insère des barres OHLCV + indicateurs réalistes dans PostgreSQL
-pour tous les 30 symboles, sans avoir besoin que le bot tourne.
+Fake data generator to test the dashboard.
+===========================================
+Inserts realistic OHLCV bars + indicators into PostgreSQL
+for all 30 symbols, without needing the bot to run.
 
-Usage (depuis src/) :
-    python -m tools.seed_fake_data           # 500 barres par symbole
+Usage (from src/):
+    python -m tools.seed_fake_data           # 500 bars per symbol
     python -m tools.seed_fake_data --bars 1000
-    python -m tools.seed_fake_data --reset   # efface les données existantes
+    python -m tools.seed_fake_data --reset   # wipe the existing data
 """
 
 import argparse
@@ -22,9 +22,9 @@ from core.constants import CRYPTO_SYMBOLS
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-random.seed(42)  # reproductible
+random.seed(42)  # reproducible
 
-# Prix de référence réalistes (ordre de grandeur 2025-2026)
+# Realistic reference prices (2025-2026 order of magnitude)
 BASE_PRICES: dict[str, float] = {
     "AAPL":    213.0,
     "ABBV":    187.0,
@@ -58,7 +58,7 @@ BASE_PRICES: dict[str, float] = {
     "XOM":     112.0,
 }
 
-# Volatilité 1-min (en écart-type du log-rendement)
+# 1-min volatility (as the std dev of the log-return)
 VOLATILITY: dict[str, float] = {
     "BTC/USD":  0.0030,
     "ETH/USD":  0.0035,
@@ -77,24 +77,24 @@ DEFAULT_VOL = 0.0014
 
 CRYPTO: set[str] = CRYPTO_SYMBOLS
 
-# Vendredi 2026-05-22 — dernier jour de marché avant le week-end
-FRIDAY_CLOSE = datetime(2026, 5, 22, 20, 0, 0, tzinfo=UTC)   # 16h00 ET
-FRIDAY_OPEN  = datetime(2026, 5, 22, 13, 30, 0, tzinfo=UTC)  # 09h30 ET
-NOW          = datetime(2026, 5, 23, 10, 0, 0, tzinfo=UTC)   # samedi matin
+# Friday 2026-05-22 — last market day before the weekend
+FRIDAY_CLOSE = datetime(2026, 5, 22, 20, 0, 0, tzinfo=UTC)   # 16:00 ET
+FRIDAY_OPEN  = datetime(2026, 5, 22, 13, 30, 0, tzinfo=UTC)  # 09:30 ET
+NOW          = datetime(2026, 5, 23, 10, 0, 0, tzinfo=UTC)   # Saturday morning
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Génération de barres
+#  Bar generation
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _market_timestamps(n_bars: int) -> list[datetime]:
-    """Génère n_bars timestamps 1-min pendant les heures de marché US.
+    """Generate n_bars 1-min timestamps during US market hours.
 
-    Remonte dans le passé depuis FRIDAY_CLOSE en sautant les nuits
-    et les week-ends.
+    Walks back into the past from FRIDAY_CLOSE, skipping nights
+    and weekends.
     """
     result: list[datetime] = []
-    # On génère en partant de vendredi soir et en remontant
+    # Generate starting from Friday evening and walking back
     t   = FRIDAY_CLOSE - timedelta(minutes=1)
     day = t.date()
 
@@ -105,7 +105,7 @@ def _market_timestamps(n_bars: int) -> list[datetime]:
         market_close = datetime(
             day.year, day.month, day.day, 20,  0, tzinfo=UTC
         )
-        # Saut week-end (5=sam, 6=dim)
+        # Weekend skip (5=Sat, 6=Sun)
         if day.weekday() >= 5:
             day -= timedelta(days=1)
             continue
@@ -122,7 +122,7 @@ def _market_timestamps(n_bars: int) -> list[datetime]:
 
 
 def _crypto_timestamps(n_bars: int) -> list[datetime]:
-    """Génère n_bars timestamps 1-min continus jusqu'à NOW."""
+    """Generate n_bars continuous 1-min timestamps up to NOW."""
     return [
         NOW - timedelta(minutes=(n_bars - 1 - i))
         for i in range(n_bars)
@@ -130,14 +130,14 @@ def _crypto_timestamps(n_bars: int) -> list[datetime]:
 
 
 def generate_bars(symbol: str, n_bars: int) -> list[tuple]:
-    """Génère n_bars de données OHLCV réalistes par marche aléatoire.
+    """Generate n_bars of realistic OHLCV data via a random walk.
 
     Args:
-        symbol: Identifiant du symbole (ex. ``"AAPL"`` ou ``"BTC/USD"``).
-        n_bars: Nombre de barres à générer.
+        symbol: Symbol identifier (e.g. ``"AAPL"`` or ``"BTC/USD"``).
+        n_bars: Number of bars to generate.
 
     Returns:
-        list[tuple]: Lignes prêtes pour INSERT dans ``bars``.
+        list[tuple]: Rows ready for INSERT into ``bars``.
     """
     is_crypto = symbol in CRYPTO
     vol       = VOLATILITY.get(symbol, DEFAULT_VOL)
@@ -158,7 +158,7 @@ def generate_bars(symbol: str, n_bars: int) -> list[tuple]:
         high_p  = max(open_p, close_p) * (1 + intra)
         low_p   = min(open_p, close_p) * (1 - intra)
 
-        # Volume : plus élevé sur les barres à forte variation
+        # Volume: higher on bars with a large move
         base_vol = (
             price * 0.5          if is_crypto
             else price * 2_000
@@ -180,7 +180,7 @@ def generate_bars(symbol: str, n_bars: int) -> list[tuple]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Génération d'indicateurs
+#  Indicator generation
 # ══════════════════════════════════════════════════════════════════════════════
 
 def generate_indicators(
@@ -188,21 +188,21 @@ def generate_indicators(
     n_signals: int  = 5,
     threshold: int  = 2,
 ) -> list[tuple]:
-    """Génère des lignes d'indicateurs avec votes et signaux BUY/SELL/HOLD.
+    """Generate indicator rows with votes and BUY/SELL/HOLD signals.
 
     Args:
-        bars      : Barres générées par ``generate_bars()``.
-        n_signals : Nombre total de signaux actifs.
-        threshold : Seuil de vote pour déclencher un ordre.
+        bars      : Bars generated by ``generate_bars()``.
+        n_signals : Total number of active signals.
+        threshold : Vote threshold to trigger an order.
 
     Returns:
-        list[tuple]: Lignes prêtes pour INSERT dans ``indicators``.
+        list[tuple]: Rows ready for INSERT into ``indicators``.
     """
     rows        = []
     in_position = False
 
     for i, (symbol, ts_bar, _, _, _, close, volume) in enumerate(bars):
-        # Évaluation timestamp = bar timestamp + 2 secondes (réaliste)
+        # Evaluation timestamp = bar timestamp + 2 seconds (realistic)
         ts_eval = (
             datetime.fromisoformat(ts_bar) + timedelta(seconds=2)
         ).isoformat()
@@ -210,7 +210,7 @@ def generate_indicators(
         vol_avg   = volume * random.uniform(0.5, 1.5)
         vol_spike = 1 if random.random() < 0.06 else 0
 
-        # Warmup : pas de signal sur les 50 premiers bars
+        # Warmup: no signal on the first 50 bars
         if i < 50:
             rows.append((
                 symbol, ts_eval, round(close, 4),
@@ -221,19 +221,19 @@ def generate_indicators(
         rnd = random.random()
 
         if not in_position and rnd < 0.025:
-            # Entrée : votes BUY suffisants
+            # Entry: enough BUY votes
             buy_v, sell_v = threshold, random.randint(0, threshold - 1)
             signal        = "BUY"
             in_position   = True
 
         elif in_position and rnd < 0.022:
-            # Sortie : votes SELL suffisants
+            # Exit: enough SELL votes
             buy_v, sell_v = random.randint(0, threshold - 1), threshold
             signal        = "SELL"
             in_position   = False
 
         else:
-            # HOLD : votes insuffisants
+            # HOLD: not enough votes
             buy_v  = random.randint(0, threshold - 1)
             sell_v = random.randint(0, threshold - 1)
             signal = "HOLD"
@@ -248,19 +248,19 @@ def generate_indicators(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Écriture en base
+#  Writing to the database
 # ══════════════════════════════════════════════════════════════════════════════
 
 def reset_db(conn: psycopg.Connection) -> None:
-    """Supprime toutes les données existantes."""
-    # indicators référence bars → TRUNCATE en cascade sur les deux.
+    """Delete all existing data."""
+    # indicators references bars → cascading TRUNCATE on both.
     conn.execute("TRUNCATE indicators, bars RESTART IDENTITY CASCADE")
     conn.commit()
     print("🗑️  Données existantes effacées.")
 
 
 def seed(n_bars: int, reset: bool) -> None:
-    """Point d'entrée principal : génère et insère les données fictives."""
+    """Main entry point: generate and insert the fake data."""
     conn = db.connect()
     db.init_schema(conn)
 
@@ -305,7 +305,7 @@ def seed(n_bars: int, reset: bool) -> None:
             f"dernier prix : {last_close:>10.2f}"
         )
 
-    # Résumé
+    # Summary
     n_bars_total = conn.execute(
         "SELECT COUNT(*) AS n FROM bars"
     ).fetchone()["n"]

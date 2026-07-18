@@ -70,7 +70,7 @@ def run(
         )
 
     logger.info(
-        "Backtest événementiel '%s' — %d symbole(s), coûts %.3f%%/side",
+        "Event-driven backtest '%s' — %d symbol(s), costs %.3f%%/side",
         strategy.name, len(csvs),
         (cfg["scorer_fee_pct"] + cfg["scorer_slippage_pct"]) * 100,
     )
@@ -109,5 +109,5 @@ def run(
                 f"{r['total_return']:.6f},{r['max_drawdown']:.6f},"
                 f"{r['n_trades']},{r['n_bars']}\n"
             )
-    logger.info("✓ Résultats écrits: %s", out)
+    logger.info("✓ Results written: %s", out)
     return results

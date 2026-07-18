@@ -47,7 +47,7 @@ docker compose exec bot python -m live.scorer
 docker compose exec db psql -U tradingbot -d tradingbot
 ```
 
-**There is no test suite and no linter configured** — no pytest, no ruff. There is no test command to run; don't go looking for one. The `py_compile`-and-smoke-test approach in `REFACTOR_PLAN.md` phase 10 is the only verification precedent in the repo. `pre-commit` and `commitizen` are installed, but they lint **commit messages only** (see *Conventions*) — nothing runs at the `pre-commit` stage.
+**There is no test suite and no linter configured** — no pytest, no ruff. There is no test command to run; don't go looking for one. The `py_compile`-and-smoke-test approach in `archive/REFACTOR_PLAN.md` phase 10 is the only verification precedent in the repo. `pre-commit` and `commitizen` are installed, but they lint **commit messages only** (see *Conventions*) — nothing runs at the `pre-commit` stage.
 
 ```bash
 uv run pre-commit install            # once per clone — activates the commit-msg hook
@@ -63,7 +63,7 @@ uv run pre-commit install            # once per clone — activates the commit-m
 - `live/scorer.py` — weekly symbol ranking by simulated Sharpe
 - `backtest/event_driven.py` → `core/simulation.py` — historical replay
 
-This is the whole point of the layout. Before the merge documented in `REFACTOR_PLAN.md`, the signals existed in three hand-maintained copies and silently drifted, so the scorer ranked symbols on a strategy that was no longer the one being traded. A change to `evaluate_bar` intentionally changes backtest, scorer and live at once — that is the design, not a hazard to route around.
+This is the whole point of the layout. Before the merge documented in `archive/REFACTOR_PLAN.md`, the signals existed in three hand-maintained copies and silently drifted, so the scorer ranked symbols on a strategy that was no longer the one being traded. A change to `evaluate_bar` intentionally changes backtest, scorer and live at once — that is the design, not a hazard to route around.
 
 `core/engine.py` deliberately owns **no** position tracking, order placement, stop-loss, or persistence. Those belong to the callers. Keep it that way.
 
@@ -85,7 +85,7 @@ So editing a strategy file does not change a running bot, and three different wr
 
 ### The vectorized replica can drift
 
-`backtest/vectorized/strategies_vbt.py` re-implements the signals vectorized (vectorbt) for speed. It is a *second* implementation and parity with `core/signals.py` was **not** re-validated by the refactor (`REFACTOR_PLAN.md` §5). Use the vectorized scripts for exploration; final validation of a strategy always goes through `python backtest.py <name>`, which is slower but divergence-free by construction.
+`backtest/vectorized/strategies_vbt.py` re-implements the signals vectorized (vectorbt) for speed. It is a *second* implementation and parity with `core/signals.py` was **not** re-validated by the refactor (`archive/REFACTOR_PLAN.md` §5). Use the vectorized scripts for exploration; final validation of a strategy always goes through `python backtest.py <name>`, which is slower but divergence-free by construction.
 
 ### Data store
 
@@ -112,6 +112,6 @@ Two traps:
 - **GitHub**: `.claude/rules/github.md` — read an issue's **comments** before working it, and interview rather than guess when something is undecided. Branches are created with `gh issue develop --name <github-username>/<issue-number>-<slug>` (never `git checkout -b`, which does not link the branch to its issue) — and still ask first.
 - **Agents**: `.claude/agents/` holds subagent definitions. Security review is a two-agent pipeline: `security-analyst` (opus, read-only) runs `/security-review` + the `security-checklist` skill and writes a report to `security-reports/`; then **you** (the main conversation) show it and ask the user to approve, and only on approval spawn `security-fixer` (opus) to apply it. The analyst can't ask for that approval itself — subagents have no `AskUserQuestion` — so the confirmation gate is the main thread's job. Delegate to `security-analyst` whenever the user asks if something is secure/safe, the risks of a change, or for a vulnerability review. Reports are committed but the repo is public, so they carry no exploit detail or secret values.
 - **Design loop**: for a decision that is expensive to reverse, `software-architect` (opus, language-agnostic, no `Edit`) drafts into `docs/.architecture-design/<slug>.md` and `nemesis` (sonnet) attacks it — then **you** adjudicate, because the architect must never grade the critique of its own work. A supervisor agent was considered and rejected: the main thread already fills that role. One round-trip, then it reaches the user with what was raised and what you dismissed. Answer ordinary architecture questions ("is the current structure good?") directly — the loop is two cold starts and is not free. `nemesis` is generic: point it at any proposal, not just a design. Only `README.md` is tracked in that directory; drafts are gitignored and a design worth keeping is promoted to its issue, `CLAUDE.md` or code. **Verify a subagent's claims about the filesystem yourself** (`ls -lai`) — the architect has twice fabricated the state of its own output path, though never the content of its designs.
-- **Language**: user-facing docs (`src/README.md`, `deploy/README.md`) are in **French**; code, docstrings and comments are in **English**. Match the file you are in.
+- **Language**: `.claude/rules/language.md` (loaded when touching `.md` / `.txt` / `.py`) — English for the machine, French for the end-user. Developer- and machine-facing text (code, comments, docstrings, `logger` logs, every README, `TODO.md` / `DONE.md`, `docs/.architecture-design/`, commits, the DB) is **English**; end-user-facing text (CLI output — `print`/`argparse`/`SystemExit`, dashboard UI strings, and domain docs like `docs/GUIDE_SIGNAUX_METHODES.md`) stays **French**. `archive/` is frozen — leave it French. Match the file you are in.
 - **`TODO.md` / `DONE.md`** (repo root) are a hand-maintained log. Both the user and Claude write to them: a worked-on TODO bullet moves to `DONE.md`, and `DONE.md` is to be updated after any significant change. **Keep every bullet to 2 sentences at most** — reference a GitHub issue (`TODO.md`) or a commit (`DONE.md`) instead of writing a long description. `DONE.md` entries are grouped newest-first under `## <date> — <title>` headings.
 - `archive/` holds superseded files kept for verification — do not treat it as live code.

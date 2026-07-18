@@ -174,7 +174,7 @@ def sig_zscore(
 
 csv_files = sorted(DATA_DIR.glob("*_5min_3ans.csv"))
 if not csv_files:
-    raise SystemExit(f"No CSV found in {DATA_DIR}")
+    raise SystemExit(f"Aucun CSV trouvé dans {DATA_DIR}")
 
 closes: dict[str, pd.Series] = {}
 bh_perfs: dict[str, float] = {}

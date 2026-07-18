@@ -217,20 +217,20 @@ def _print_table(results: list[dict], top_x: int, min_sharpe: float) -> None:
 def main() -> None:
     """Run the scorer: rank candidates, optionally update config.json."""
     parser = argparse.ArgumentParser(
-        description="Rank crypto symbols by strategy Sharpe and update "
-                    "config.json['symbols']."
+        description="Classe les symboles crypto par Sharpe de la stratégie "
+                    "et met à jour config.json['symbols']."
     )
     parser.add_argument(
         "--dry-run", action="store_true",
-        help="Print rankings without modifying config.json.",
+        help="Affiche le classement sans modifier config.json.",
     )
     parser.add_argument(
         "--top",  type=int, default=None,
-        help="Override scorer_top_x from config.",
+        help="Surcharge scorer_top_x de la config.",
     )
     parser.add_argument(
         "--days", type=int, default=None,
-        help="Override scorer_lookback_days from config.",
+        help="Surcharge scorer_lookback_days de la config.",
     )
     args = parser.parse_args()
 
@@ -285,8 +285,8 @@ def main() -> None:
         write_symbols(selected)
         log.info(
             f"✅ config.json updated with symbols: {selected}\n"
-            f"   Le bot applique la nouvelle liste à chaud (~30 s) : "
-            f"nouveaux symboles abonnés, retirés liquidés."
+            f"   The bot applies the new list hot (~30 s): "
+            f"new symbols subscribed, removed ones liquidated."
         )
 
 

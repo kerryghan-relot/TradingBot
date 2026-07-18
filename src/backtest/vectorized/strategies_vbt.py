@@ -529,4 +529,4 @@ for _combo in combinations(_names, 5):
     STRATEGIES["+".join(_combo) + "_3v5"] = _make_vote(list(_combo), seuil=3)
 
 
-print(f"[strategies.py] {len(STRATEGIES)} strategies loaded.")
+print(f"[strategies.py] {len(STRATEGIES)} stratégies chargées.")
