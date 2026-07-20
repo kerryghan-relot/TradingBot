@@ -4,14 +4,13 @@ This file lists features, ideas, and improvement points that could be added to t
 Once a bullet point has been completed, move it to DONE.md.
 Each point must be concise (max 2 sentences); link a GitHub issue for full context when needed.
 
-- [ ] add code developer agent [#3]
-- [ ] add code analyst and reviewer agent [#3]
+- [ ] Code-builder agent [#9] — deferred: use the `/code-review` skill for now (and run it on the founding test suite so it ships reviewed); build a bespoke agent only once a test suite exists and its test-adequacy scope proves distinct enough from `/code-review`. Englobes more things: 1) develop the functrionnalioty, 2) check for comments and docstrings, 3) simplification using the `/simplify` skill. 4) code quality/duplication by using the  `/code-review` skill., 5) run test suite and ensure everything is correct. My workflow would be "plan out the feature -> ask nemesis -> once good go with code-builder"
 - [ ] add 2FA (with TOTP codes) — [#4](https://github.com/kerryghan-relot/TradingBot/issues/4)
 - [ ] per-user config and per-user Alpaca keys (multi-tenant) — [#6](https://github.com/kerryghan-relot/TradingBot/issues/6), blocked by #4
 
 ## Correctness / risk
 
-- [ ] **No test suite.** The signal maths and vote engine are pure functions and they decide trades, yet `archive/REFACTOR_PLAN.md` §5 leaves stateful ↔ vectorized parity unvalidated.
+- [ ] **No test suite.** The signal maths and vote engine are pure functions and they decide trades.
 - [ ] **Crypto CSVs carry no volume**, so VolSpike and VWAP never vote on BTC/ETH in research (noted in `backtest_scorer_oos.py`). Two of the live strategy's five signals are therefore dead on crypto in every backtest.
 - [ ] **`/api/config` has no demo path** — GET and POST always write the real `config.json`, even when the dashboard serves demo data. A demo UI can silently reconfigure a live bot.
 - [ ] **Config editor gaps.** `macd_fast`/`macd_slow`, `kalman_q`/`kalman_r`/`kalman_roll_win`, `orb_bars` and `time_skip` are missing from `web/server/strategies.py:EDITABLE` although their signals are toggleable — enable from the browser, but no way to tune.

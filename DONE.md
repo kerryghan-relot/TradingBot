@@ -3,6 +3,12 @@
 This file lists completed work and briefly explains what changed. Update it after every addition or significant change to the project.
 Each point must be concise (max 2 sentences); link a commit for full context when needed.
 
+## 2026-07-20 — `add-signal` skill + agent-authoring principle (issue #3)
+
+- **`.claude/skills/add-signal/SKILL.md`** (new) — the full registration checklist for adding a signal type, spanning `core/signals.py` (`sig_*`, `warmup_needed`), `core/engine.py` (import, `evaluate_bar`, and `SignalState`/`start_bar` for stateful signals), `core/config.py` (`DEFAULT_CONFIG`) and `web/server/strategies.py` (`ALL_SIGNALS`/`EDITABLE`), plus the `py_compile → backtest.py` smoke test. Built because the drift it prevents has already shipped — the `EDITABLE` gap, still open in `TODO.md`.
+- **No _bare_ Code Writer agent** (issue #3): a writer that only emits a diff compresses nothing (it must be reviewed in full regardless of author), so it was declined; the main thread implements for now, with a scope-locked, self-verifying build-loop agent (implement + `/simplify` + `/code-review` + tests, downstream of plan + `nemesis`) deliberately deferred to #9. The `add-signal` skill is the alternative the user preferred, `nemesis`-vetted before building.
+- **Agent-authoring principle** (issue #3): `CLAUDE.md`'s Conventions gains a "Writing a new agent" bullet — generic method in the body, repo-specifics in a loaded skill/checklist — with `security-analyst` named as the deliberate repo-specific counter-example. Existing agents are not retrofitted.
+
 ## 2026-07-17 — Language convention + docs reorganisation
 
 - **`.claude/rules/language.md`** (new) — formalises the split: English for machine- and developer-facing text (code, comments, docstrings, `logger` logs, READMEs, `TODO.md` / `DONE.md`, commits, DB), French for end-user-facing text (CLI output via `print`/`argparse`/`SystemExit`, dashboard UI strings, and domain docs). `CLAUDE.md`'s Language bullet now points here.
