@@ -3,7 +3,7 @@ Unified Research Dashboard — All testing methods in one place.
 =============================================================
 Launch (from src/): streamlit run backtest/dashboard.py
 
-Pages:
+Pages (labels match the French sidebar ``PAGES`` dict):
   1. Stratégies Vote     — vote-based backtest + walk-forward comparison
   2. Random Forest       — ML strategy results
   3. Optimisation        — hyperparameter grid search results
@@ -254,7 +254,7 @@ with st.sidebar:
 
 
 # ══════════════════════════════════════════════════════════════════
-# PAGE 1 : STRATÉGIES VOTE
+# PAGE 1: VOTE STRATEGIES
 # ══════════════════════════════════════════════════════════════════
 
 def page_vote() -> None:
@@ -598,7 +598,7 @@ def page_ml() -> None:
 
 
 # ══════════════════════════════════════════════════════════════════
-# PAGE 3 : OPTIMISATION HYPERPARAMÈTRES
+# PAGE 3: HYPERPARAMETER OPTIMIZATION
 # ══════════════════════════════════════════════════════════════════
 
 def page_hyperparams() -> None:
@@ -976,7 +976,7 @@ def page_topx() -> None:
 
 
 # ══════════════════════════════════════════════════════════════════
-# PAGE 5 : COMPARAISON MÉTHODES
+# PAGE 5: METHODS COMPARISON
 # ══════════════════════════════════════════════════════════════════
 
 def page_compare() -> None:
@@ -1388,7 +1388,7 @@ def page_optimize_topx() -> None:
 
 
 # ══════════════════════════════════════════════════════════════════
-# PAGE 7 : STRATÉGIE V2 — LES CHOIX
+# PAGE 7: STRATEGY V2 — THE CHOICES
 # ══════════════════════════════════════════════════════════════════
 
 def page_v2_choices() -> None:
@@ -1418,7 +1418,7 @@ causes identifiées, chacune corrigée par un choix précis de la V2 :
 
     st.markdown("---")
 
-    # ── Choix 1 : barres 15 min ──────────────────────────────────
+    # ── Choice 1: 15-min bars ──────────────────────────────────
     section("Choix 1 — Barres 15 minutes (au lieu de 5)")
     st.markdown(
         """
@@ -1438,7 +1438,7 @@ moins souvent, pour des trajets plus longs.
             language="python",
         )
 
-    # ── Choix 2 : z-score ────────────────────────────────────────
+    # ── Choice 2: z-score ────────────────────────────────────────
     section("Choix 2 — Le déclencheur : z-score en croisement")
     st.markdown(
         """
@@ -1468,7 +1468,7 @@ Deux décisions importantes ici :
 """
     )
 
-    # ── Choix 3 : Efficiency Ratio ───────────────────────────────
+    # ── Choice 3: Efficiency Ratio ───────────────────────────────
     section("Choix 3 — Le filtre de régime : Efficiency Ratio < 0,35")
     st.markdown(
         """
@@ -1498,7 +1498,7 @@ qui manquait au vote de la V1.
 """
     )
 
-    # ── Choix 4 : filtre de volatilité ───────────────────────────
+    # ── Choice 4: volatility filter ───────────────────────────
     section("Choix 4 — Le filtre économique : volatilité ≥ 0,3 %")
     st.markdown(
         """
@@ -1524,7 +1524,7 @@ moins de trades, meilleurs trades.
 """
     )
 
-    # ── Choix 5 : les sorties ────────────────────────────────────
+    # ── Choice 5: the exits ────────────────────────────────────
     section("Choix 5 — Trois sorties, chacune avec un rôle")
     st.markdown(
         """
@@ -1541,7 +1541,7 @@ objectif, une date limite et un plan d'évacuation :
 """
     )
 
-    # ── Choix 6 : protocole ──────────────────────────────────────
+    # ── Choice 6: protocol ──────────────────────────────────────
     section("Choix 6 — La discipline de validation")
     st.markdown(
         """
@@ -1570,12 +1570,12 @@ méthode :
 
 
 # ══════════════════════════════════════════════════════════════════
-# PAGE 8 : STRATÉGIE V2 — LE TEST
+# PAGE 8: STRATEGY V2 — THE TEST
 # ══════════════════════════════════════════════════════════════════
 
-# Valeurs issues du run du 2026-07-05 qui ne sont pas recalculables
-# depuis les CSV (benchmark aléatoire, split train/test, actions
-# seules). Relancer backtest_v2_regime_mr.py pour les régénérer.
+# Values from the 2026-07-05 run that are not recomputable from the
+# CSVs (random benchmark, train/test split, stocks only). Re-run
+# backtest_v2_regime_mr.py to regenerate them.
 V2_RUN_INFO: dict = {
     "run_date": "2026-07-05",
     "train_range": "2023-03-01 → 2025-06-12",
@@ -1652,7 +1652,7 @@ def page_v2_test() -> None:
 
     st.markdown("---")
 
-    # ── KPIs portefeuille (recalculés depuis les CSV) ────────────
+    # ── Portfolio KPIs (recomputed from the CSVs) ────────────
     section("Résultats — portefeuille test (30 symboles)")
     rets = eq["test_equity"].pct_change().dropna()
     years = max(
@@ -1702,7 +1702,7 @@ aléatoires** (la sélection top-X de la V1 n'en battait que 31 %).
 """
     )
 
-    # ── Courbe d'équité ──────────────────────────────────────────
+    # ── Equity curve ──────────────────────────────────────────
     section("Courbe d'équité — période de test")
     fig_eq = go.Figure(
         go.Scatter(
@@ -1717,7 +1717,7 @@ aléatoires** (la sélection top-X de la V1 n'en battait que 31 %).
     )
     st.plotly_chart(fig_eq, use_container_width=True)
 
-    # ── Par symbole ──────────────────────────────────────────────
+    # ── By symbol ──────────────────────────────────────────────
     section("Rendement net par symbole (test)")
     df_sorted = df.sort_values("test_total_net_%", ascending=False)
     st.plotly_chart(
@@ -1769,7 +1769,7 @@ aléatoires** (la sélection top-X de la V1 n'en battait que 31 %).
 
 
 # ══════════════════════════════════════════════════════════════════
-# PAGE 9 : SÉLECTION TOP-X (V2)
+# PAGE 9: TOP-X SELECTION (V2)
 # ══════════════════════════════════════════════════════════════════
 
 def page_v2_topx() -> None:
@@ -1814,7 +1814,7 @@ et on retient les 5 mieux classées, en poids égaux.
 
     st.markdown("---")
 
-    # ── Comparaison des 4 portefeuilles ───────────────────────────
+    # ── Comparison of the 4 portfolios ───────────────────────────
     section("Quatre portefeuilles comparés sur la période de test")
     cols = st.columns(3)
     labels = {
@@ -1860,7 +1860,7 @@ et on retient les 5 mieux classées, en poids égaux.
 
     st.markdown("---")
 
-    # ── Effet du lookback de classement ───────────────────────────
+    # ── Effect of the ranking lookback ───────────────────────────
     section("Le classement hebdomadaire à courte vue ne marche pas")
     st.markdown(
         """

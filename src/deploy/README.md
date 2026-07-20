@@ -1,87 +1,87 @@
-# Déploiement — Docker Compose
+# Deployment — Docker Compose
 
-Tout le stack (PostgreSQL, bot, dashboard, scorer, backups, reverse proxy) tourne en conteneurs, orchestré par `docker-compose.yml` à la racine du repo. Accès au dashboard via HTTPS + mot de passe.
+The whole stack (PostgreSQL, bot, dashboard, scorer, backups, reverse proxy) runs in containers, orchestrated by `docker-compose.yml` at the repo root. Dashboard access via HTTPS + password.
 
-## Les services
+## The services
 
-| Service     | Rôle |
+| Service     | Role |
 |-------------|------|
-| `db`        | PostgreSQL 16 (volume `pgdata`). Remplace l'ancien `bars.db`. |
-| `bot`       | `python -m live.bot` — moteur de trading, `restart: always`. |
-| `web`       | Dashboard Flask + React buildé, servi par gunicorn (port interne 8501). |
-| `nginx`     | Reverse proxy 80/443, TLS auto-signé + basic auth devant le dashboard. |
-| `scheduler` | [ofelia](https://github.com/mcuadros/ofelia) : scorer hebdo + backup quotidien, via `docker exec` dans les conteneurs existants. |
+| `db`        | PostgreSQL 16 (volume `pgdata`). Replaces the old `bars.db`. |
+| `bot`       | `python -m live.bot` — trading engine, `restart: always`. |
+| `web`       | Flask dashboard + built React, served by gunicorn (internal port 8501). |
+| `nginx`     | Reverse proxy 80/443, self-signed TLS + basic auth in front of the dashboard. |
+| `scheduler` | [ofelia](https://github.com/mcuadros/ofelia): weekly scorer + daily backup, via `docker exec` into the existing containers. |
 
-La planification est **dans le stack** — plus de cron hôte ni de systemd. Le scorer tourne chaque dimanche 18h (`job-exec` dans `bot`), le backup `pg_dump` chaque nuit à 2h vers le volume `backups` (rétention 30 jours, `job-exec` dans `db`).
+Scheduling is **in the stack** — no more host cron or systemd. The scorer runs every Sunday at 18:00 (`job-exec` in `bot`), the `pg_dump` backup every night at 02:00 to the `backups` volume (30-day retention, `job-exec` in `db`).
 
-## Prérequis
+## Prerequisites
 
-- Un hôte Linux (Ubuntu 22.04+ recommandé) avec Docker Engine + le plugin `compose`. Le script `setup_vps.sh` les installe si absents.
-- Un fichier `.env` à la racine du repo : `cp .env.example .env` puis renseigne `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`, un `POSTGRES_PASSWORD` solide et les identifiants `DASHBOARD_USER` / `DASHBOARD_PASSWORD`.
+- A Linux host (Ubuntu 22.04+ recommended) with Docker Engine + the `compose` plugin. The `setup_vps.sh` script installs them if absent.
+- A `.env` file at the repo root: `cp .env.example .env` then fill in `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`, a strong `POSTGRES_PASSWORD` and the `DASHBOARD_USER` / `DASHBOARD_PASSWORD` credentials.
 
-## Démarrage rapide (VPS)
+## Quick start (VPS)
 
 ```bash
-# 1. Récupérer le repo sur l'hôte (git clone ou rsync).
-# 2. Configurer les secrets :
+# 1. Get the repo onto the host (git clone or rsync).
+# 2. Configure the secrets:
 cp .env.example .env && nano .env
 
-# 3. Installer Docker + générer les secrets nginx + lancer la stack :
+# 3. Install Docker + generate the nginx secrets + start the stack:
 sudo bash src/deploy/scripts/setup_vps.sh
 ```
 
-Puis ouvre `https://<IP_DU_VPS>`. Le certificat étant auto-signé, le navigateur affiche un avertissement une fois — clique « Avancé → continuer », puis saisis les identifiants du dashboard.
+Then open `https://<VPS_IP>`. Since the certificate is self-signed, the browser shows a warning once — click "Advanced → continue", then enter the dashboard credentials.
 
-## Démarrage manuel (local ou serveur)
+## Manual start (local or server)
 
 ```bash
-cp .env.example .env                          # remplir les valeurs
+cp .env.example .env                          # fill in the values
 bash src/deploy/docker/init_secrets.sh   # certs + .htpasswd
 docker compose build
 docker compose up -d
 ```
 
-Pour peupler la base avec des données de démo (sans faire tourner le bot) :
+To populate the database with demo data (without running the bot):
 
 ```bash
 docker compose run --rm bot python -m tools.seed_fake_data
 ```
 
-## Opérations courantes
+## Common operations
 
 ```bash
-# État et logs
+# State and logs
 docker compose ps
 docker compose logs -f bot
 docker compose logs -f web
 
-# Mise à jour du code
+# Code update
 git pull
 docker compose build
 docker compose up -d
 
-# Lancer le scorer à la demande
+# Run the scorer on demand
 docker compose exec bot python -m live.scorer
 
-# Backup manuel de la base
+# Manual database backup
 docker compose exec db sh -c \
   'pg_dump -U tradingbot tradingbot | gzip > /backups/manual_$(date +%F).sql.gz'
 
-# Ouvrir un psql
+# Open a psql
 docker compose exec db psql -U tradingbot -d tradingbot
 
-# Voir les sauvegardes
+# View the backups
 docker compose exec db ls -lh /backups
 ```
 
-## Migrer vers un vrai domaine plus tard
+## Migrating to a real domain later
 
-L'emplacement `/.well-known/acme-challenge/` est déjà câblé dans `deploy/docker/nginx.conf` (servi via le volume `certbot-webroot`). Quand un domaine pointe vers l'hôte :
+The `/.well-known/acme-challenge/` location is already wired in `deploy/docker/nginx.conf` (served via the `certbot-webroot` volume). When a domain points to the host:
 
-1. Renseigne le `server_name` réel dans `nginx.conf`.
-2. Ajoute un conteneur `certbot/certbot` (ou lance-le ponctuellement) en mode `--webroot -w /var/www/certbot -d ton-domaine.com`.
-3. Monte les certificats émis à la place des certs auto-signés et recharge nginx (`docker compose exec nginx nginx -s reload`).
+1. Fill in the real `server_name` in `nginx.conf`.
+2. Add a `certbot/certbot` container (or run it one-off) in `--webroot -w /var/www/certbot -d your-domain.com` mode.
+3. Mount the issued certificates in place of the self-signed certs and reload nginx (`docker compose exec nginx nginx -s reload`).
 
-## Limite connue
+## Known limitation
 
-L'onglet **Configuration** du dashboard modifie `config.json` (signaux actifs, seuils, stop-loss) depuis le navigateur. C'est protégé par le mot de passe Nginx, mais ça reste une écriture exposée à distance — ne partage jamais les identifiants du dashboard.
+The **Configuration** tab of the dashboard modifies `config.json` (active signals, thresholds, stop-loss) from the browser. It is protected by the Nginx password, but it remains a remotely exposed write — never share the dashboard credentials.

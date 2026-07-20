@@ -4,12 +4,13 @@ This file lists features, ideas, and improvement points that could be added to t
 Once a bullet point has been completed, move it to DONE.md.
 Each point must be concise (max 2 sentences); link a GitHub issue for full context when needed.
 
-- [ ] add architect agent
-- [ ] add 2FA (with TOTP codes)
+- [ ] Code-builder agent [#9] — deferred: use the `/code-review` skill for now (and run it on the founding test suite so it ships reviewed); build a bespoke agent only once a test suite exists and its test-adequacy scope proves distinct enough from `/code-review`. Englobes more things: 1) develop the functrionnalioty, 2) check for comments and docstrings, 3) simplification using the `/simplify` skill. 4) code quality/duplication by using the  `/code-review` skill., 5) run test suite and ensure everything is correct. My workflow would be "plan out the feature -> ask nemesis -> once good go with code-builder"
+- [ ] add 2FA (with TOTP codes) — [#4](https://github.com/kerryghan-relot/TradingBot/issues/4)
+- [ ] per-user config and per-user Alpaca keys (multi-tenant) — [#6](https://github.com/kerryghan-relot/TradingBot/issues/6), blocked by #4
 
 ## Correctness / risk
 
-- [ ] **No test suite.** The signal maths and vote engine are pure functions and they decide trades, yet `REFACTOR_PLAN.md` §5 leaves stateful ↔ vectorized parity unvalidated.
+- [ ] **No test suite.** The signal maths and vote engine are pure functions and they decide trades.
 - [ ] **Crypto CSVs carry no volume**, so VolSpike and VWAP never vote on BTC/ETH in research (noted in `backtest_scorer_oos.py`). Two of the live strategy's five signals are therefore dead on crypto in every backtest.
 - [ ] **`/api/config` has no demo path** — GET and POST always write the real `config.json`, even when the dashboard serves demo data. A demo UI can silently reconfigure a live bot.
 - [ ] **Config editor gaps.** `macd_fast`/`macd_slow`, `kalman_q`/`kalman_r`/`kalman_roll_win`, `orb_bars` and `time_skip` are missing from `web/server/strategies.py:EDITABLE` although their signals are toggleable — enable from the browser, but no way to tune.
@@ -17,7 +18,7 @@ Each point must be concise (max 2 sentences); link a GitHub issue for full conte
 
 ## Duplication creeping back
 
-- [ ] **`web/server/data.py` re-implements Alpaca access** with raw `requests` and its own `is_crypto` instead of using `core/broker.py` — the duplication `REFACTOR_PLAN.md` §2.3 set out to kill.
+- [ ] **`web/server/data.py` re-implements Alpaca access** with raw `requests` and its own `is_crypto` instead of using `core/broker.py` — the duplication `archive/REFACTOR_PLAN.md` §2.3 set out to kill.
 - [ ] **`backtest/vectorized/optimize.py` re-implements** `sig_bb`, `sig_ema_cross`, `sig_macd_zero` and `sig_zscore` locally, without importing `strategies_vbt`. That is a fourth copy of the signal maths.
 - [ ] **`core/broker.py` raises at import** when Alpaca keys are missing, so `live.bot` and `live.scorer` cannot be imported or tested without secrets. Moving the check into the `make_*` factories would fix it.
 
@@ -31,7 +32,7 @@ Each point must be concise (max 2 sentences); link a GitHub issue for full conte
 
 - [ ] **The bot image ships the whole research stack** — `streamlit`, `dash`, `plotly`, `vectorbt`, `xgboost` and the Jupyter packages sit in main `dependencies`. Moving them to a `research` group would cut image size sharply (`requests` is also listed twice).
 - [ ] **No linter enforces `.claude/rules/code-style.md`.** `ruff` could check nearly all of it mechanically (80 cols, PEP 8, `X | None`, built-in generics).
-- [ ] **Two dashboards remain unfused** (Streamlit for research, React for live), deferred as out of scope by `REFACTOR_PLAN.md` §6.3.
+- [ ] **Two dashboards remain unfused** (Streamlit for research, React for live), deferred as out of scope by `archive/REFACTOR_PLAN.md` §6.3.
 
 ## Ergonomics / docs drift
 
@@ -41,4 +42,4 @@ Each point must be concise (max 2 sentences); link a GitHub issue for full conte
 - [ ] **Stale copy referencing the old SQLite store**: the demo banner claims "aucune base `bars.db`" when the check is actually PostgreSQL. `backtest/dashboard.py` also says 5 pages when `PAGES` has 9, and points at `python backtest_multi.py`.
 - [ ] **Benchmarks only exist in demo mode** — `assemble.history()` always returns `bench: None`, so the S&P/Nasdaq/MSCI selector is inert on real data.
 - [ ] **`active_strategy_id()` is a heuristic** that picks whichever strategy shares the most values with `config.json`. A hand-edited config can report a strategy never selected.
-- [ ] **Self-signed TLS + shared basic-auth** on a dashboard that can write `config.json` remotely (flagged in `deploy/README.md`). The 2FA item above is the mitigation.
+- [ ] **Self-signed TLS + shared basic-auth** on a dashboard that can write `config.json` remotely (flagged in `deploy/README.md`). 2FA ([#4](https://github.com/kerryghan-relot/TradingBot/issues/4)) only mitigates the shared-password half; the self-signed TLS is a separate fix ([#5](https://github.com/kerryghan-relot/TradingBot/issues/5)), since a session cookie stolen over a MITM'd connection defeats 2FA.

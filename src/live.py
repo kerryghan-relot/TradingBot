@@ -1,16 +1,16 @@
 """
-CLI — lance le bot live avec une stratégie donnée.
-===================================================
-Usage (depuis src/)::
+CLI — run the live bot with a given strategy.
+=============================================
+Usage (from src/)::
 
     python live.py vote_mr
 
-Comportement config :
+Config behaviour:
 
-- ``config/config.json`` absent  → créé depuis la stratégie ;
-- présent → les clés qui divergent de la stratégie sont signalées,
-  mais le fichier fait foi (le bot le hot-reload en continu et le
-  scorer y écrit la liste des symboles chaque semaine).
+- ``config/config.json`` absent  → created from the strategy;
+- present → the keys that diverge from the strategy are reported,
+  but the file is authoritative (the bot hot-reloads it continuously
+  and the scorer writes the symbol list into it every week).
 """
 
 import argparse
@@ -36,8 +36,8 @@ def _sync_config(strategy: Strategy) -> None:
     diffs = {
         k: (v, on_disk[k])
         for k, v in strategy.config.items()
-        # "symbols" diverge par construction: le scorer réécrit la
-        # liste chaque semaine — ce n'est pas une dérive de stratégie.
+        # "symbols" diverges by construction: the scorer rewrites the
+        # list every week — it is not a strategy drift.
         if k != "symbols" and k in on_disk and on_disk[k] != v
     }
     if diffs:
@@ -50,7 +50,7 @@ def _sync_config(strategy: Strategy) -> None:
 
 
 def main() -> None:
-    """Charge la stratégie, synchronise la config et démarre le bot."""
+    """Load the strategy, sync the config and start the bot."""
     parser = argparse.ArgumentParser(
         description="Démarre le bot live avec la stratégie donnée."
     )
@@ -63,8 +63,8 @@ def main() -> None:
     strategy = load_strategy(args.strategy)
     _sync_config(strategy)
 
-    # Importé ici seulement: live.bot vérifie .env et se connecte à la
-    # base à l'import — inutile avant d'avoir validé la stratégie demandée.
+    # Imported here only: live.bot checks .env and connects to the
+    # database at import — pointless before the requested strategy is validated.
     from live.bot import main as run_bot
     run_bot()
 

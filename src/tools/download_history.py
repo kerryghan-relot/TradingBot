@@ -188,11 +188,11 @@ def main() -> None:
     success/failure summary at the end.
     """
     parser = argparse.ArgumentParser(
-        description="Download 3 years of 5-min bars from Twelve Data."
+        description="Télécharge 3 ans de barres 5-min depuis Twelve Data."
     )
     parser.add_argument(
         "symbols", nargs="*", default=list(SYMBOLS),
-        help="Symbols to download (default: the full 30-symbol universe).",
+        help="Symboles à télécharger (défaut : l'univers complet de 30 symboles).",
     )
     args = parser.parse_args()
 

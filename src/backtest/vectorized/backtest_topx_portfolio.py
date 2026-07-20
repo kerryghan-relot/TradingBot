@@ -47,16 +47,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ── Configuration ────────────────────────────────────────────────
-# Nom de la stratégie à utiliser — doit exister dans STRATEGIES.
+# Name of the strategy to use — must exist in STRATEGIES.
 STRATEGY_NAME: str = "VWAP+OU"
 
-TOP_X: int = 5                  # nombre de symboles à sélectionner
+TOP_X: int = 5                  # number of symbols to select
 REBALANCE_FREQ: str = "W-FRI"  # "D" daily | "W-FRI" weekly | "M" monthly
-LOOKBACK_WEEKS: int = 4        # fenêtre de scoring (en semaines)
+LOOKBACK_WEEKS: int = 4        # scoring window (in weeks)
 LOOKBACK_BARS: int = LOOKBACK_WEEKS * BARS_PER_WEEK
 
-MIN_SCORE_TO_INVEST: float = 0.0   # score Z minimum pour investir
-MIN_TRADES_IN_LOOKBACK: int = 3    # ignorer si moins de N trades sur la fenêtre
+MIN_SCORE_TO_INVEST: float = 0.0   # minimum Z score to invest
+MIN_TRADES_IN_LOOKBACK: int = 3    # ignore if fewer than N trades over the window
 
 CSV_SCORE_OUT   = OUTPUT_DIR / "scores_topx.csv"
 CSV_WEIGHTS_OUT = OUTPUT_DIR / "weights_topx.csv"
@@ -73,7 +73,7 @@ if STRATEGY_NAME not in STRATEGIES:
     )
 
 fn_strat = STRATEGIES[STRATEGY_NAME]
-logger.info("Stratégie sélectionnée : %s", STRATEGY_NAME)
+logger.info("Selected strategy: %s", STRATEGY_NAME)
 
 
 # ── Helpers ──────────────────────────────────────────────────────
@@ -237,13 +237,13 @@ close_df = pd.DataFrame(
 ).ffill()
 
 logger.info(
-    "%d symboles chargés | %d barres communes",
+    "%d symbols loaded | %d common bars",
     len(symbols), len(common_index),
 )
 
 
 # ── Run strategy on every symbol ─────────────────────────────────
-logger.info("Calcul de la stratégie '%s' sur tous les symboles...", STRATEGY_NAME)
+logger.info("Computing strategy '%s' on all symbols...", STRATEGY_NAME)
 t_start = time.time()
 
 strat_equity: dict[str, np.ndarray] = {}
@@ -307,7 +307,7 @@ for s_idx, symbol in enumerate(symbols):
         close_arr, equity_arr, rets_arr, rebalance_pos
     )
 
-    # Masquer les périodes avec trop peu de trades (non fiables)
+    # Mask the periods with too few trades (unreliable)
     insufficient = tr < MIN_TRADES_IN_LOOKBACK
     a[insufficient]  = np.nan
     sh[insufficient] = np.nan
@@ -342,7 +342,7 @@ for dt in rebalance_dates:
     if eligible.empty:
         continue
 
-    # Poids égaux sur les symboles sélectionnés
+    # Equal weights on the selected symbols
     weights_df.loc[dt, eligible.index] = 1.0 / len(eligible)
 
 if not weights_df.index.is_unique:
@@ -364,11 +364,11 @@ for i in range(len(rebalance_pos) - 1):
         w = w.iloc[-1]
     w = w.astype(float)
 
-    # Frais sur le turnover du portefeuille
+    # Fees on the portfolio turnover
     turnover = (w - prev_weights).abs().sum()
     fee_cost = turnover * FEES
 
-    # Retour de la STRATÉGIE sur chaque symbole dans la période
+    # STRATEGY return on each symbol over the period
     symbol_rets = pd.Series(dtype=float, index=symbols)
     for sym in symbols:
         eq = strat_equity[sym]
@@ -402,10 +402,10 @@ sharpe_port = (
 )
 
 logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-logger.info("Stratégie      : %s", STRATEGY_NAME)
-logger.info("Capital final  : %.2f $  (%+.2f%%)", final_equity, total_ret)
+logger.info("Strategy       : %s", STRATEGY_NAME)
+logger.info("Final capital  : %.2f $  (%+.2f%%)", final_equity, total_ret)
 logger.info("Max Drawdown   : %.2f%%", max_dd)
-logger.info("Sharpe annuel  : %.3f", sharpe_port)
+logger.info("Annual Sharpe  : %.3f", sharpe_port)
 logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
 
@@ -535,7 +535,7 @@ with open(HTML_REPORT_OUT, "w", encoding="utf-8") as _f:
     _f.write(html)
 
 elapsed = time.time() - t_start
-logger.info("Terminé en %.1f min", elapsed / 60)
+logger.info("Done in %.1f min", elapsed / 60)
 logger.info("Scores  : %s", CSV_SCORE_OUT)
 logger.info("Weights : %s", CSV_WEIGHTS_OUT)
 logger.info("Equity  : %s", CSV_EQUITY_OUT)

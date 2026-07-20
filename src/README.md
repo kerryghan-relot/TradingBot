@@ -1,36 +1,34 @@
-# src — code du bot
+# src — bot code
 
-Projet unifié : recherche, backtesting et exécution live partagent le même moteur de signaux. Une stratégie s'écrit **une seule fois** et tourne à l'identique en backtest et en live.
+Unified project: research, backtesting and live execution share the same signal engine. A strategy is written **once** and runs identically in backtest and in live.
 
-Ce fichier décrit le **workflow** (créer → backtester → passer live). Pour la vue d'ensemble, la stack technique et l'architecture, voir le [README racine](../README.md) ; pour l'exploitation, voir [deploy/README.md](deploy/README.md).
+This file describes the **workflow** (create → backtest → go live). For the overview, the technical stack and the architecture, see the [root README](../README.md); for operations, see [deploy/README.md](deploy/README.md).
 
 ## Structure
 
 ```
 src/
-├── strategies/        # une stratégie = un fichier (config du moteur de vote)
-├── core/              # code partagé : signaux, moteur, broker, config, métriques
-├── backtest/          # moteur événementiel + scripts vectorbt (recherche rapide)
-├── live/              # bot Alpaca, scorer hebdo
-├── web/               # dashboard temps réel (API Flask + front React)
-├── tools/             # téléchargement d'historique, données factices
-├── config/            # config.json (runtime, gitignoré) + exemple versionné
-├── data/              # CSV 5-min 3 ans par symbole (gitignoré)
-├── results/           # sorties de backtests (gitignoré)
-├── deploy/            # Docker Compose : nginx + scheduler + setup VPS
-├── docs/              # guide des signaux et méthodes
-├── archive/           # fichiers retirés, gardés pour vérification
-├── backtest.py        # CLI backtest
-└── live.py            # CLI live
+├── strategies/        # one strategy = one file (vote engine config)
+├── core/              # shared code: signals, engine, broker, config, metrics
+├── backtest/          # event-driven engine + vectorbt scripts (fast research)
+├── live/              # Alpaca bot, weekly scorer
+├── web/               # real-time dashboard (Flask API + React front)
+├── tools/             # history download, fake data
+├── config/            # config.json (runtime, gitignored) + versioned example
+├── data/              # 5-min 3-year CSVs per symbol (gitignored)
+├── results/           # backtest outputs (gitignored)
+└── deploy/            # Docker Compose: nginx + scheduler + VPS setup
 ```
 
-Toutes les commandes se lancent **depuis `src/`** avec le venv du repo activé (`..\.venv\Scripts\activate.ps1`).
+The signals guide lives at the repo root in [`../docs/GUIDE_SIGNAUX_METHODES.md`](../docs/GUIDE_SIGNAUX_METHODES.md), and superseded files in `../archive/`.
 
-## Workflow : créer → backtester → passer live
+All commands run **from `src/`** with the repo venv activated (`..\.venv\Scripts\activate.ps1`).
 
-### 1. Créer une stratégie
+## Workflow: create → backtest → go live
 
-Copier [strategies/vote_mr.py](strategies/vote_mr.py) sous un nouveau nom (ex. `strategies/ma_strat.py`) et surcharger les clés voulues :
+### 1. Create a strategy
+
+Copy [strategies/vote_mr.py](strategies/vote_mr.py) under a new name (e.g. `strategies/ma_strat.py`) and override the keys you want:
 
 ```python
 from core.config import DEFAULT_CONFIG
@@ -38,7 +36,7 @@ from strategies import Strategy
 
 STRATEGY = Strategy(
     name="ma_strat",
-    description="BB + OU seulement, seuil 2 votes",
+    description="BB + OU only, threshold 2 votes",
     config={
         **DEFAULT_CONFIG,
         "active_signals": ["BB", "OU"],
@@ -47,76 +45,76 @@ STRATEGY = Strategy(
 )
 ```
 
-Les signaux disponibles (BB, OU, VWAP, VolSpike, KalmanZ, RSI, EMA_Cross, MACD_Zero, Zscore, ORB, TimeFilter) et leurs paramètres sont documentés dans `core/config.py` et `docs/`. Un nouveau *type* de signal s'ajoute dans `core/signals.py` + `core/engine.py`.
+The available signals (BB, OU, VWAP, VolSpike, KalmanZ, RSI, EMA_Cross, MACD_Zero, Zscore, ORB, TimeFilter) and their parameters are documented in `core/config.py` and the repo-root `docs/`. A new signal *type* is added in `core/signals.py` + `core/engine.py`.
 
-### 2. Backtester
+### 2. Backtest
 
 ```bash
-python backtest.py ma_strat                     # tous les CSV de data/
-python backtest.py ma_strat --symbols AAPL NVDA # sous-ensemble
+python backtest.py ma_strat                     # all CSVs in data/
+python backtest.py ma_strat --symbols AAPL NVDA # subset
 ```
 
-Le backtest événementiel rejoue l'historique bar par bar via `core/engine.py` — le code exact du bot live — et écrit `results/event_ma_strat.csv` (Sharpe, return, drawdown, trades par symbole). S'il manque des données : `python -m tools.download_history` (clé `TWELVE_DATA_API_KEY` dans `.env`).
+The event-driven backtest replays history bar by bar via `core/engine.py` — the exact code of the live bot — and writes `results/event_ma_strat.csv` (Sharpe, return, drawdown, trades per symbol). If data is missing: `python -m tools.download_history` (`TWELVE_DATA_API_KEY` key in `.env`).
 
-Pour l'exploration rapide (grilles de paramètres, portefeuilles top-X), les scripts vectorisés restent disponibles :
+For fast exploration (parameter grids, top-X portfolios), the vectorized scripts remain available:
 
 ```bash
 python -m backtest.vectorized.backtest_multi
 python -m backtest.vectorized.optimize
-streamlit run backtest/dashboard.py     # visualisation des résultats
+streamlit run backtest/dashboard.py     # results visualization
 ```
 
-Ils vectorisent les maths des signaux pour la vitesse ; la validation finale passe toujours par `backtest.py` (zéro divergence possible).
+They vectorize the signal maths for speed; the final validation always goes through `backtest.py` (zero divergence possible).
 
-### 3. Passer en live
+### 3. Go live
 
 ```bash
 python live.py ma_strat
 ```
 
-- `config/config.json` absent → créé depuis la stratégie ;
-- présent → les divergences stratégie/config sont affichées (le fichier fait foi : le bot le hot-reload, le scorer y écrit les symboles chaque semaine).
+- `config/config.json` absent → created from the strategy;
+- present → strategy/config divergences are reported (the file wins: the bot hot-reloads it, the scorer writes the symbols into it every week).
 
-Clés Alpaca dans `.env` à la racine du repo (`ALPACA_API_KEY`, `ALPACA_SECRET_KEY`). Le bot est en paper trading (`PAPER = True` dans `core/broker.py`).
+Alpaca keys in `.env` at the repo root (`ALPACA_API_KEY`, `ALPACA_SECRET_KEY`). The bot is in paper trading (`PAPER = True` in `core/broker.py`).
 
-Suivi : dashboard web temps réel, logs dans `bot.log`.
+Monitoring: real-time web dashboard, logs in `bot.log`.
 
-### Dashboard web (live/monitoring)
+### Web dashboard (live/monitoring)
 
-Nouveau front (remplace l'ancien dashboard Streamlit) : API JSON Flask
-+ interface React reprenant le design AlgoDesk. Il lit la base PostgreSQL + le compte Alpaca et bascule automatiquement en mode démonstration (données fictives) tant qu'aucune source réelle n'est disponible.
+New front (replaces the old Streamlit dashboard): Flask JSON API
++ React interface reusing the AlgoDesk design. It reads the PostgreSQL database + the Alpaca account and automatically switches to demonstration mode (fake data) as long as no real source is available.
 
 ```bash
-# 1. Builder le front une fois (ou après modif du front)
+# 1. Build the front once (or after a front change)
 cd web/frontend && npm install && npm run build && cd ../..
 
-# 2. Lancer le serveur (sert le front + l'API sur le même port)
+# 2. Start the server (serves the front + the API on the same port)
 python -m web.run                 # http://127.0.0.1:8501
 
-# Développement du front avec hot-reload (proxy /api vers Flask) :
-#   terminal A : python -m web.run
-#   terminal B : cd web/frontend && npm run dev   # http://127.0.0.1:5173
+# Front development with hot-reload (proxies /api to Flask):
+#   terminal A: python -m web.run
+#   terminal B: cd web/frontend && npm run dev   # http://127.0.0.1:5173
 ```
 
-L'onglet **Configuration** édite `config/config.json` (signaux, seuils, sizing, symboles) directement depuis le navigateur — le bot recharge à chaud.
+The **Configuration** tab edits `config/config.json` (signals, thresholds, sizing, symbols) directly from the browser — the bot hot-reloads it.
 
-## Scorer hebdomadaire
+## Weekly scorer
 
 ```bash
-python -m live.scorer --dry-run   # aperçu du classement
-python -m live.scorer             # écrit le top-X dans config.json
+python -m live.scorer --dry-run   # ranking preview
+python -m live.scorer             # writes the top-X into config.json
 ```
 
-Planification : le service `scheduler` (ofelia) du stack Docker lance le scorer chaque dimanche 18h — voir [deploy/README.md](deploy/README.md).
+Scheduling: the `scheduler` service (ofelia) of the Docker stack runs the scorer every Sunday at 18:00 — see [deploy/README.md](deploy/README.md).
 
-## Déploiement (Docker Compose)
+## Deployment (Docker Compose)
 
-Tout le stack (PostgreSQL, bot, dashboard, nginx, scheduler) est conteneurisé. Démarrage rapide depuis la racine du repo :
+The whole stack (PostgreSQL, bot, dashboard, nginx, scheduler) is containerized. Quick start from the repo root:
 
 ```bash
-cp .env.example .env                          # clés Alpaca + mots de passe
+cp .env.example .env                          # Alpaca keys + passwords
 bash src/deploy/docker/init_secrets.sh   # certs + basic auth
 docker compose up -d --build
 ```
 
-Sur un VPS neuf : `sudo bash src/deploy/scripts/setup_vps.sh` (installe Docker puis démarre tout) — voir [deploy/README.md](deploy/README.md).
+On a fresh VPS: `sudo bash src/deploy/scripts/setup_vps.sh` (installs Docker then starts everything) — see [deploy/README.md](deploy/README.md).

@@ -441,7 +441,7 @@ def load_all_symbols() -> dict[str, pd.DataFrame]:
             df = df[~glitch]
         df["volume"] = df["volume"].fillna(0.0)
         frames[ticker] = df
-        logger.info("  %-8s %6d barres", ticker, len(df))
+        logger.info("  %-8s %6d bars", ticker, len(df))
     return frames
 
 
@@ -472,12 +472,12 @@ def max_drawdown(equity: np.ndarray) -> float:
 def run_backtest() -> None:
     """Run the full out-of-sample selection backtest and write reports."""
     t0 = time.time()
-    logger.info("Chargement des donnees...")
+    logger.info("Loading data...")
     frames = load_all_symbols()
     tickers = list(frames)
 
     logger.info(
-        "Simulation de la strategie sur %d symboles...", len(tickers)
+        "Simulating the strategy on %d symbols...", len(tickers)
     )
     per_symbol: dict[str, pd.Series] = {}
     for ticker, df in frames.items():
@@ -485,7 +485,7 @@ def run_backtest() -> None:
         n_active = int((rets != 0).sum())
         per_symbol[ticker] = rets
         logger.info(
-            "  %-8s ret_total=%+7.2f%%  barres_actives=%d",
+            "  %-8s ret_total=%+7.2f%%  active_bars=%d",
             ticker, ((1 + rets).prod() - 1) * 100, n_active,
         )
 
@@ -493,7 +493,7 @@ def run_backtest() -> None:
     matrix = pd.DataFrame(per_symbol).fillna(0.0)
     index = matrix.index
     logger.info(
-        "Matrice: %d barres × %d symboles (%.1f s)",
+        "Matrix: %d bars × %d symbols (%.1f s)",
         len(matrix), len(tickers), time.time() - t0,
     )
 
@@ -666,7 +666,7 @@ def run_backtest() -> None:
         html, encoding="utf-8"
     )
     logger.info(
-        "Rapport écrit: %s (%.1f s au total)",
+        "Report written: %s (%.1f s total)",
         OUTPUT_DIR / "scorer_oos_report.html", time.time() - t0,
     )
 

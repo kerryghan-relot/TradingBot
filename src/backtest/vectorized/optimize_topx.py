@@ -43,7 +43,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ── Configuration (même que backtest_topx_portfolio.py) ──────────
+# ── Configuration (same as backtest_topx_portfolio.py) ──────────
 TOP_X: int = 5
 REBALANCE_FREQ: str = "W-FRI"
 LOOKBACK_WEEKS: int = 4
@@ -290,7 +290,7 @@ close_df = pd.DataFrame(
     {s: closes[s].reindex(common_index) for s in symbols}
 ).ffill()
 
-# ── Rebalance schedule (calculé une seule fois) ──────────────────
+# ── Rebalance schedule (computed once) ──────────────────────────
 rebalance_dates = (
     pd.Series(common_index, index=common_index)
     .resample(REBALANCE_FREQ).last()
@@ -311,7 +311,7 @@ rebalance_dates = common_index[rebalance_pos]
 
 logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 logger.info(
-    "%d symboles | %d stratégies | %d rebalancements",
+    "%d symbols | %d strategies | %d rebalances",
     len(symbols), len(STRATEGIES), len(rebalance_dates),
 )
 logger.info(
@@ -332,7 +332,7 @@ n_total   = len(STRATEGIES)
 
 for strat_idx, (strat_name, fn_strat) in enumerate(STRATEGIES.items()):
     try:
-        # 1. Calcul des signaux et equity sur tous les symboles
+        # 1. Compute the signals and equity on all symbols
         strat_equity: dict[str, np.ndarray] = {}
         strat_rets:   dict[str, np.ndarray] = {}
 
@@ -363,14 +363,14 @@ for strat_idx, (strat_name, fn_strat) in enumerate(STRATEGIES.items()):
             rebalance_dates=rebalance_dates,
         )
 
-        # 3. Écriture CSV incrémentale
-        ligne = (
+        # 3. Incremental CSV write
+        line = (
             f'"{strat_name}",'
             f'{res["perf"]},{res["sharpe"]},{res["dd"]},'
             f'{res["avg_active"]},{res["n_cash"]}\n'
         )
         with open(CSV_OUT, "a", encoding="utf-8") as _f:
-            _f.write(ligne)
+            _f.write(line)
 
         sign = "✓" if res["perf"] >= 0 else "✗"
         logger.info(
@@ -406,10 +406,10 @@ df_res.to_csv(CSV_OUT, index=False)
 
 elapsed_total = time.time() - t_global
 logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-logger.info("✓ %d stratégies testées / %d erreurs", n_ok, n_err)
-logger.info("✓ Durée totale : %.1f min", elapsed_total / 60)
+logger.info("✓ %d strategies tested / %d errors", n_ok, n_err)
+logger.info("✓ Total duration: %.1f min", elapsed_total / 60)
 
-# ── Top 10 dans les logs ─────────────────────────────────────────
+# ── Top 10 in the logs ───────────────────────────────────────────
 logger.info("\n── Top 10 par Sharpe ──")
 logger.info(
     "\n%s",

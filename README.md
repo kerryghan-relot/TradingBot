@@ -6,7 +6,7 @@ Several mean-reversion signals vote on every 1-minute bar; when enough of them a
 
 - **Practical workflow** (create a strategy → backtest → go live): [`src/README.md`](src/README.md)
 - **Deployment and operations**: [`src/deploy/README.md`](src/deploy/README.md)
-- **Signals reference**: [`src/docs/GUIDE_SIGNAUX_METHODES.md`](src/docs/GUIDE_SIGNAUX_METHODES.md)
+- **Signals reference**: [`docs/GUIDE_SIGNAUX_METHODES.md`](docs/GUIDE_SIGNAUX_METHODES.md)
 
 ## Getting started
 
@@ -90,7 +90,7 @@ The payoff is that scheduling ships with the repo. There is no host crontab and 
 
 ## Structure
 
-Everything lives under `src/`; the repo root holds the shared venv, the container stack and dependency management.
+Application code lives under `src/`; the repo root holds the shared venv, the container stack, dependency management, and the `docs/` (signals guide, architecture designs) and `archive/` (superseded files, kept for verification) directories.
 
 ```
 src/
@@ -111,9 +111,7 @@ src/
 ├── config/       # config.json (runtime, gitignored) + versioned example
 ├── data/         # 5-min CSVs (gitignored)
 ├── results/      # backtest outputs (gitignored)
-├── deploy/       # Docker assets + VPS setup script
-├── docs/         # signals guide
-└── archive/      # superseded files, kept for verification
+└── deploy/       # Docker assets + VPS setup script
 ```
 
 Two details that surprise people reading the code for the first time:

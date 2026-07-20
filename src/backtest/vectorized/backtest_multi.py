@@ -40,23 +40,23 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ── CLI ─────────────────────────────────────────────────────────
-_parser = argparse.ArgumentParser(description="Multi-strategy backtest")
+_parser = argparse.ArgumentParser(description="Backtest multi-stratégies")
 _parser.add_argument(
     "--ml",
     action="store_true",
-    help="Use RandomForest strategy instead of vote strategies",
+    help="Utilise la stratégie RandomForest au lieu des stratégies de vote",
 )
 _parser.add_argument(
     "--html",
     action="store_true",
-    help="Generate per-symbol Plotly charts (uses more RAM)",
+    help="Génère les graphiques Plotly par symbole (consomme plus de RAM)",
 )
 _parser.add_argument(
     "--walk-forward",
     action="store_true",
     help=(
-        "Compute signals on full series (warmup), "
-        "evaluate metrics on last --test-ratio of data only"
+        "Calcule les signaux sur toute la série (warmup), "
+        "évalue les métriques uniquement sur les derniers --test-ratio des données"
     ),
 )
 _parser.add_argument(
@@ -64,7 +64,7 @@ _parser.add_argument(
     type=float,
     default=0.3,
     metavar="RATIO",
-    help="Fraction of data used as out-of-sample test set (default: 0.3)",
+    help="Fraction des données utilisée comme jeu de test hors-échantillon (défaut : 0.3)",
 )
 args = _parser.parse_args()
 
@@ -81,7 +81,7 @@ HTML_OUT = OUTPUT_DIR / f"resultats_backtest{_suffix}.html"
 # ── Load files ───────────────────────────────────────────────────
 csv_files = sorted(DATA_DIR.glob("*_5min_3ans.csv"))
 if not csv_files:
-    raise SystemExit(f"No CSV files found in {DATA_DIR}")
+    raise SystemExit(f"Aucun CSV trouvé dans {DATA_DIR}")
 
 nb_assets = len(csv_files)
 nb_strats = len(STRATEGIES)
