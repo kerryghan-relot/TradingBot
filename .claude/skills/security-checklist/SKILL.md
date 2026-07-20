@@ -1,6 +1,6 @@
 ---
 name: security-checklist
-description: This repo's security hotspots and the rules for reviewing them — the .env / Alpaca-key handling, the /api/config remote-write endpoint, the import-time credential check, self-signed TLS + shared basic-auth, and SQL construction in core/db.py. Load when doing any security review, threat-modelling, or audit of the trading bot, and before writing a report to security-reports/.
+description: This repo's security hotspots and the rules for reviewing them — the .env / Alpaca-key handling, the /api/config remote-write endpoint, the import-time credential check, self-signed TLS + shared basic-auth, and SQL construction in core/db.py. Load when doing any security review, threat-modelling, or audit of the trading bot, and before writing a report to docs/.security-reports/.
 ---
 
 # Security checklist — TradingBot
@@ -12,7 +12,7 @@ This is a paper-trading bot that holds **live broker credentials** and exposes a
 The single hard rule: **never read, echo, log, or write the *values* of secrets.** Verify how a secret is *handled* (is it gitignored, is it passed safely, is it logged by accident) without ever surfacing the secret itself into the transcript, a report, or a commit.
 
 - `.env` (repo root) holds `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` today and will hold `TOTP_SECRET` after [#4]. `settings.json` denies the Read tool on `**/.env` — do not route around that with `cat` / `Get-Content` to see values. Confirm `.env` is gitignored and that no key is hardcoded anywhere in `src/`.
-- Reports live in `security-reports/` and **are committed to a public repo**. A report may name a weakness, its file/line, and the fix. It must **not** contain a working exploit payload, a secret value, or a copy-pasteable attack. A severe, not-yet-public finding goes to a **private GitHub Security Advisory**, not a committed file.
+- Reports live in `docs/.security-reports/` and are **gitignored** — local to the analyst → fixer handoff, not published, because on a public repo a review that enumerates the fragile spots is a recon map. A report may name a weakness, its file/line, and the fix, but must still **not** contain a working exploit payload, a secret value, or a copy-pasteable attack. A severe, not-yet-public finding goes to a **private GitHub Security Advisory**, not a report file.
 
 ## The five hotspots
 
@@ -34,7 +34,7 @@ Because the repo is public: no secret, private URL, internal hostname, or exploi
 
 Two agents, split so analysis can never quietly edit code:
 
-1. `security-analyst` (read-only) invokes `/security-review` on the pending diff, walks this checklist against the changed files and their blast radius, and writes findings to `security-reports/<topic>-<YYYY-MM-DD>.md` — ranked by severity, each with `file:line` and a concrete fix, within the disclosure limits above.
+1. `security-analyst` (read-only) invokes `/security-review` on the pending diff, walks this checklist against the changed files and their blast radius, and writes findings to `docs/.security-reports/<topic>-<YYYY-MM-DD>.md` — ranked by severity, each with `file:line` and a concrete fix, within the disclosure limits above.
 2. The user reviews that report. On approval, `security-fixer` applies the proposed fixes. The confirmation happens in the main conversation, because a subagent cannot prompt the user itself.
 
 Links like [#4] / [#5] point at the GitHub issues that track the fixes for these hotspots; surface the hotspot, let the issue track the work.

@@ -21,6 +21,13 @@ src/deploy/docker/.htpasswd
 docs/.architecture-design/*
 !docs/.architecture-design/README.md
 
+# Security-analyst reports (local analyst -> fixer working documents).
+# The directory and its README are tracked; every report inside it is not.
+# Same `/*` + `!` shape as the block above, for the same reason. Public repo:
+# a committed review that enumerates the bot's fragile spots is a recon map.
+docs/.security-reports/*
+!docs/.security-reports/README.md
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
