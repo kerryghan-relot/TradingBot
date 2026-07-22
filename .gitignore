@@ -20,6 +20,8 @@ src/deploy/docker/.htpasswd
 # the `!` exception below would never be reached.
 docs/.architecture-design/*
 !docs/.architecture-design/README.md
+bibliography/bibliography.local.md
+bibliography/resources.local/
 
 # Security-analyst reports (local analyst -> fixer working documents).
 # The directory and its README are tracked; every report inside it is not.
