@@ -2,6 +2,7 @@
 
 A short, high-level log of completed work — one line per change, newest first. The commit history and the issues hold the detail; this is just the main things worth knowing at a glance. Add a bullet after any significant change.
 
+- 2026-07-22 — Added `bibliography/` — an MLA 9th-edition `bibliography.md` and a `resources/` folder for local copies of the freely-available references; see #14.
 - 2026-07-20 — Added `.claude/rules/project-architecture.md` (folder map, stack, runtime topology, design patterns; auto-loads on source files) and fixed CLAUDE.md's stale `language.md` load note — it is auto-loaded, not path-scoped.
 - 2026-07-20 — Added the `add-signal` skill (full signal-registration checklist) and a "Writing a new agent" convention in `CLAUDE.md`; a bare Code Writer agent was declined (deferred to #9).
 - 2026-07-17 — Added `.claude/rules/language.md` (English for machine/dev text, French for end-user text) and promoted `docs/` and `archive/` to the repo root.
